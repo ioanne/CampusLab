@@ -38,6 +38,19 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 ]
+# Django necesita cargar las INSTALLED_APPS, para poder cargar las LOCAL_APPS.
+# Las LOCAL_APPS,tmb tienen un orden. Si accounts depende de otra app, tengo que llamar primero a la otra app y dsps a accounts
+# PQ django va cargando los modulos, si cuando llega a accounts no cargó el módulo que accounts necesita, falla. 
+
+
+THIRD_APPS = [
+]
+
+LOCAL_APPS = [
+    'apps.accounts',
+]
+
+INSTALLED_APPS = INSTALLED_APPS + THIRD_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
