@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -12,13 +13,12 @@ load_dotenv(BASE_DIR / ".env")
 
 def env(name, default=None):
     return os.getenv(name, default)
-
+ 
+ 
 def env_bool(name, default=False):
     return env(name, str(int(default))).strip().lower() in {"1", "true", "yes", "on"}
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
-
+ 
+ 
 SECRET_KEY = env("SECRET_KEY", "cambia-esta-clave-en-desarrollo")
 JWT_SECRET_KEY = env("JWT_SECRET_KEY", "clave-jwt-desarrollo-super-segura-12345")
 JWT_ALGORITHM = "HS256"
@@ -27,7 +27,7 @@ REFRESH_TOKEN_DAYS = int(env("REFRESH_TOKEN_DAYS", "7"))
  
 DEBUG = env_bool("DEBUG", True)
 ALLOWED_HOSTS = [host.strip() for host in env("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip()]
- 
+
 
 
 # Application definition
@@ -45,8 +45,12 @@ EXTERNAL_APPS = [
     "ninja",
 ]
 
+# Una app por cada cosa distinta que resuelve el sistema. El orden de la lista
+# no cambia el funcionamiento, pero conviene escribirlas de la que no depende de
+# nadie a la que depende de todas: es el mismo orden en el que se construyen.
 LOCAL_APPS = [
     "apps.accounts.apps.AccountsConfig",
+    "apps.catalogs.apps.CatalogsConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + EXTERNAL_APPS + LOCAL_APPS
@@ -82,20 +86,19 @@ WSGI_APPLICATION = 'CampusLab.wsgi.application'
 
 sqlite_path = Path(env("SQLITE_PATH", BASE_DIR / "data" / "db.sqlite3"))
 sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-
 # Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': sqlite_path,
+        "NAME": sqlite_path,
     }
 }
 
 
 # Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
+# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -115,7 +118,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 # Internationalization
-# https://docs.djangoproject.com/en/6.0/topics/i18n/
+# https://docs.djangoproject.com/en/5.2/topics/i18n/
 
 LANGUAGE_CODE = "es-ar"
 TIME_ZONE = "America/Argentina/Buenos_Aires"
@@ -127,12 +130,12 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
+ 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
-
+ 
 AUTH_USER_MODEL = "accounts.User"
-
+ 
 # En desarrollo los emails se imprimen en la consola del servidor: se ve el
 # envio sin configurar un servidor de correo. En produccion se cambia el
 # backend por SMTP con las credenciales reales, via variables de entorno.

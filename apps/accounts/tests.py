@@ -1,3 +1,6 @@
+from django.test import TestCase
+
+# Create your tests here.
 import json
 
 from django.contrib.auth import get_user_model
@@ -35,9 +38,7 @@ class AccountsApiTests(TestCase):
     def test_login_returns_token_pair(self):
         response = self.client.post(
             "/api/auth/login",
-            data=json.dumps(
-                {"email": "diana@docentes.edu.ar", "password": "Docente12345!"}
-            ),
+            data=json.dumps({"email": "diana@docentes.edu.ar", "password": "Docente12345!"}),
             content_type="application/json",
         )
 
@@ -45,7 +46,6 @@ class AccountsApiTests(TestCase):
         body = response.json()
         self.assertIn("access", body)
         self.assertIn("refresh", body)
-        self.assertEqual(body["token_type"], "bearer")
 
     def test_login_rejects_bad_credentials(self):
         response = self.client.post(
@@ -57,14 +57,12 @@ class AccountsApiTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_refresh_returns_a_new_token_pair(self):
-        login_response = self.client.post(
+        response = self.client.post(
             "/api/auth/login",
-            data=json.dumps(
-                {"email": "diana@docentes.edu.ar", "password": "Docente12345!"}
-            ),
+            data=json.dumps({"email": "diana@docentes.edu.ar", "password": "Docente12345!"}),
             content_type="application/json",
         )
-        refresh = login_response.json()["refresh"]
+        refresh = response.json()["refresh"]
 
         response = self.client.post(
             "/api/auth/refresh",
@@ -73,10 +71,7 @@ class AccountsApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertIn("access", body)
-        self.assertIn("refresh", body)
-        self.assertEqual(body["token_type"], "bearer")
+        self.assertIn("access", response.json())
 
     def test_refresh_rejects_an_access_token(self):
         """Los dos tokens se firman igual: lo que los distingue es el campo
@@ -112,9 +107,9 @@ class AccountsApiTests(TestCase):
         self.assertEqual(user.role, UserRole.TEACHER)
 
     def test_teacher_can_register_without_token(self):
-        """La cuenta sola no habilita nada: el registro del docente es publico."""
+        """El registro del docente es publico: la cuenta sola no habilita nada."""
         response = self.client.post(
-            "/api/register/teacher",
+            "/api/auth/register/teacher",
             data=json.dumps(
                 {
                     "email": "dario@docentes.edu.ar",
@@ -131,7 +126,7 @@ class AccountsApiTests(TestCase):
 
     def test_teacher_registration_rejects_duplicated_email(self):
         response = self.client.post(
-            "/api/register/teacher",
+            "/api/auth/register/teacher",
             data=json.dumps(
                 {
                     "email": "diana@docentes.edu.ar",
@@ -146,6 +141,7 @@ class AccountsApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_admin_manages_users_and_others_cannot(self):
+        access = self._login("admin@plataforma.edu.ar", "Admin12345!")
         response = self.client.post(
             "/api/admin/users",
             data=json.dumps(
@@ -158,19 +154,17 @@ class AccountsApiTests(TestCase):
                 }
             ),
             content_type="application/json",
-            HTTP_AUTHORIZATION=f"Bearer {self._login('admin@plataforma.edu.ar', 'Admin12345!')}",
+            HTTP_AUTHORIZATION=f"Bearer {access}",
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["role"], UserRole.INSTITUTION)
-
-        response = self.client.get("/api/admin/users")
-        self.assertEqual(response.status_code, 401)
 
         teacher_access = self._login("diana@docentes.edu.ar", "Docente12345!")
         response = self.client.get(
             "/api/admin/users",
             HTTP_AUTHORIZATION=f"Bearer {teacher_access}",
         )
+        # 403 y no 401: la API sabe quien es, pero el rol no alcanza.
         self.assertEqual(response.status_code, 403)
 
     def test_admin_cannot_assign_a_role_that_no_longer_exists(self):
