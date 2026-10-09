@@ -40,16 +40,16 @@ class UserManager(BaseUserManager.from_queryset(UserQuerySet)):
         user.set_password(password)
         user.save(using=self._db)
         return user
-# Dejamos el código de Hernan/Grupo1, que tenía código visto en clase
-'''
-def create_user(self, email, password=None, **extra_fields):
-        if not email:
-            raise ValueError("El email es obligatorio.")
-        user = self.model(email=self.normalize_email(email).lower(), **extra_fields)
-        user.set_password(password)
-        user.save(using=self._db)
-        return user
-'''
+    # Dejamos el código de Hernan/Grupo1, que tenía código visto en clase
+    '''
+    def create_user(self, email, password=None, **extra_fields):
+            if not email:
+                raise ValueError("El email es obligatorio.")
+            user = self.model(email=self.normalize_email(email).lower(), **extra_fields)
+            user.set_password(password)
+            user.save(using=self._db)
+            return user
+    '''
 
     def create_superuser(self, email, password, **extra_fields):
         # El import va aca adentro y no arriba: models.py importa este archivo,
