@@ -16,6 +16,8 @@ def env(name, default=None):
 def env_bool(name, default=False):
     return env(name, str(int(default))).strip().lower() in {"1", "true", "on"}
 
+# Lee el archivo .env de la raíz del proyecto, si existe, y deja sus valores disponibles como variables de entorno. Lo que ya venga del sistema o de Docker tiene prioridad: el .env nunca pisa una variable que ya estaba definida.
+load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", "cambia-esta-clave-en-desarrollo")
 JWT_SECRET_KEY = env("JWT_SECRET_KEY", "clave-jwt-desarrollo-super-segura-12345")
@@ -48,6 +50,19 @@ LOCAL_APPS = [
 
 INSTALLED_APPS = DJANGO_APPS + EXTERNAL_APPS + LOCAL_APPS
 
+
+EXTERNAL_APPS = [
+    "ninja",
+]
+
+# Una app por cada cosa distinta que resuelve el sistema. El orden de la lista
+# no cambia el funcionamiento, pero conviene escribirlas de la que no depende de
+# nadie a la que depende de todas: es el mismo orden en el que se construyen.
+LOCAL_APPS = [
+    "apps.accounts",
+]
+
+INSTALLED_APPS = DJANGO_APPS + EXTERNAL_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -124,6 +139,11 @@ MEDIA_ROOT = BASE_DIR / "media"
 AUTH_USER_MODEL = "accounts.User"
 
 
+# En desarrollo los emails se imprimen en la consola del servidor: se ve el envio sin configurar un servidor de correo. En produccion se cambia elbackend por SMTP con las credenciales reales, via variables de entorno.
+EMAIL_BACKEND = env("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "no-responder@bancodeproyectos.edu.ar")
+
+# Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 

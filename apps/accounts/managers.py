@@ -28,13 +28,28 @@ class UserQuerySet(models.QuerySet):
 class UserManager(BaseUserManager.from_queryset(UserQuerySet)):
     use_in_migrations = True
 
-    def create_user(self, email, password=None, **extra_fields):
+    def _normalize_required_email(self, email):
         if not email:
             raise ValueError("El email es obligatorio.")
-        user = self.model(email=self.normalize_email(email).lower(), **extra_fields)
+        return self.normalize_email(email).lower()
+
+# Grupo 3 decidió dejar el método create_user de esta forma, porque es la utilizada en la guía.
+    def create_user(self, email, password=None, **extra_fields):
+        email = self._normalize_required_email(email)
+        user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
+    # Dejamos el código de Hernan/Grupo1, que tenía código visto en clase
+    '''
+    def create_user(self, email, password=None, **extra_fields):
+            if not email:
+                raise ValueError("El email es obligatorio.")
+            user = self.model(email=self.normalize_email(email).lower(), **extra_fields)
+            user.set_password(password)
+            user.save(using=self._db)
+            return user
+    '''
 
     def create_superuser(self, email, password, **extra_fields):
         # El import va aca adentro y no arriba: models.py importa este archivo,
