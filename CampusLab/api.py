@@ -7,6 +7,13 @@ from apps.accounts.api import (
 )
 
 from apps.catalogs.api import public_router as catalogs_router
+from apps.institutions.api import (
+    admin_router as institutions_admin_router,
+    institution_router as institutions_institution_router,
+    public_router as institutions_router,
+    teacher_router as institutions_teacher_router,
+)
+
 
 api = NinjaAPI(
     title="Banco de Proyectos API",
@@ -38,5 +45,9 @@ def healthcheck(request):
 # repetir es la ruta completa.
 api.add_router("/auth", auth_router)
 api.add_router("/auth", me_router)
+api.add_router("/teacher", institutions_teacher_router)
+api.add_router("/institution", institutions_institution_router)
 api.add_router("/admin", users_admin_router)
+api.add_router("/admin", institutions_admin_router)
+api.add_router("", institutions_router)
 api.add_router("", catalogs_router)
