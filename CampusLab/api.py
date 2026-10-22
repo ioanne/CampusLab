@@ -1,5 +1,10 @@
 from ninja import NinjaAPI
 
+from apps.academics.api import (
+    institution_router as academics_institution_router,
+    public_router as careers_router,
+    teacher_router as academics_teacher_router,
+)
 from apps.accounts.api import (
     admin_router as users_admin_router,
     me_router,
@@ -37,4 +42,7 @@ def healthcheck(request):
 # repetir es la ruta completa.
 api.add_router("/auth", auth_router)
 api.add_router("/auth", me_router)
+api.add_router("/teacher", academics_teacher_router)
+api.add_router("/institution", academics_institution_router)
 api.add_router("/admin", users_admin_router)
+api.add_router("", careers_router)
