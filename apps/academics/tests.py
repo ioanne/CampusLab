@@ -87,6 +87,7 @@ class AcademicsTestCase(TestCase):
     def _create_course(self, name="1C - Noche", teacher=None, year=2026):
         return Course.objects.create(
             career=self.career,
+            subject=self.subject,
             teacher=teacher or self.teacher,
             name=name,
             year=year,
@@ -222,6 +223,7 @@ class CourseApiTests(AcademicsTestCase):
             "/api/teacher/courses",
             {
                 "career_id": self.career.id,
+                "subject_id": self.subject.id,
                 "name": "1C - Noche",
                 "year": 2026,
                 "term": CourseTerm.FIRST.value,
@@ -248,6 +250,7 @@ class CourseApiTests(AcademicsTestCase):
             "/api/teacher/courses",
             {
                 "career_id": self.career.id,
+                "subject_id": self.subject.id,
                 "name": "1C - Noche",
                 "year": 2026,
                 "term": CourseTerm.FIRST.value,
@@ -267,6 +270,7 @@ class CourseApiTests(AcademicsTestCase):
             "/api/teacher/courses",
             {
                 "career_id": self.career.id,
+                "subject_id": self.subject.id,
                 "name": "1C - Noche",
                 "year": 2026,
                 "term": CourseTerm.FIRST.value,
@@ -284,6 +288,7 @@ class CourseApiTests(AcademicsTestCase):
             "/api/teacher/courses",
             {
                 "career_id": self.career.id,
+                "subject_id": self.subject.id,
                 "name": "1C - Noche",
                 "year": 2026,
                 "term": "VERANO",
@@ -292,6 +297,69 @@ class CourseApiTests(AcademicsTestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+        self.assertFalse(Course.objects.exists())
+
+    def test_course_comes_back_with_its_subject(self):
+        access = self._login("diana@docentes.edu.ar", "Docente12345!")
+
+        response = self._post(
+            "/api/teacher/courses",
+            {
+                "career_id": self.career.id,
+                "subject_id": self.subject.id,
+                "name": "1C - Noche",
+                "year": 2026,
+                "term": CourseTerm.FIRST.value,
+            },
+            access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["subject"],
+            {"id": self.subject.id, "name": "Programacion I", "career_id": self.career.id},
+        )
+        self.assertEqual(Course.objects.get().subject, self.subject)
+
+    def test_subject_of_another_career_is_rejected(self):
+        """La materia y la cursada tienen que ser de la misma carrera."""
+        other_career = Career.objects.create(
+            institution=self.institution, name="Analisis de Sistemas"
+        )
+        foreign_subject = Subject.objects.create(career=other_career, name="Base de Datos")
+        access = self._login("diana@docentes.edu.ar", "Docente12345!")
+
+        response = self._post(
+            "/api/teacher/courses",
+            {
+                "career_id": self.career.id,
+                "subject_id": foreign_subject.id,
+                "name": "1C - Noche",
+                "year": 2026,
+                "term": CourseTerm.FIRST.value,
+            },
+            access,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("subject_id", response.json()["detail"])
+        self.assertFalse(Course.objects.exists())
+
+    def test_subject_is_required(self):
+        access = self._login("diana@docentes.edu.ar", "Docente12345!")
+
+        response = self._post(
+            "/api/teacher/courses",
+            {
+                "career_id": self.career.id,
+                "name": "1C - Noche",
+                "year": 2026,
+                "term": CourseTerm.FIRST.value,
+            },
+            access,
+        )
+
+        self.assertEqual(response.status_code, 422)
         self.assertFalse(Course.objects.exists())
 
     def test_course_answers_its_institution_through_the_career(self):

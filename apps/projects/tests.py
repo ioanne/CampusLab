@@ -16,7 +16,14 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
-from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student
+from apps.academics.models import (
+    Career,
+    Course,
+    CourseStudent,
+    CourseTerm,
+    Student,
+    Subject,
+)
 from apps.accounts.models import UserRole
 from apps.catalogs.models import Technology
 from apps.institutions.models import (
@@ -74,9 +81,11 @@ class ProjectScenario(TestCase):
             institution=self.institution,
             name="Desarrollo de Software",
         )
+        self.subject = Subject.objects.create(career=self.career, name="Programacion I")
         # Dos cursadas del mismo docente: el MVP pide que pueda tener mas de una.
         self.course = Course.objects.create(
             career=self.career,
+            subject=self.subject,
             teacher=self.teacher,
             name="1C - Noche",
             year=2026,
@@ -84,6 +93,7 @@ class ProjectScenario(TestCase):
         )
         self.other_course = Course.objects.create(
             career=self.career,
+            subject=self.subject,
             teacher=self.teacher,
             name="2C - Manana",
             year=2026,
@@ -637,8 +647,10 @@ class PublishingPrivilegeTests(ProjectScenario):
         otra_carrera = Career.objects.create(
             institution=self.other_institution, name="Analisis de Sistemas"
         )
+        otra_materia = Subject.objects.create(career=otra_carrera, name="Programacion I")
         otra_cursada = Course.objects.create(
             career=otra_carrera,
+            subject=otra_materia,
             teacher=self.teacher,
             name="1C - Noche",
             year=2026,

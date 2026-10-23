@@ -50,13 +50,17 @@ def create_subject(career, *, name):
     return Subject.objects.create(career=career, name=name)
 
 
-def create_course(teacher, *, career_id, name, year, term):
+def create_course(teacher, *, career_id, subject_id, name, year, term):
     """Alta de una cursada, hecha por el docente que la va a dictar.
 
     Aca aparece la regla de permisos del docente: no alcanza con tener el rol
     TEACHER (eso solo abre la puerta del router), hay que tener la membresia
     aceptada en la institucion duena de la carrera. El administrador queda
     afuera de la regla porque no representa a ninguna institucion: destraba.
+
+    La cursada guarda su carrera y su materia, y la materia ya sabe de que
+    carrera es: que las dos coincidan no lo puede garantizar la base, asi que
+    se pregunta aca.
 
     El periodo llega como texto desde la API, asi que se valida contra las
     opciones antes de guardar: el choices del modelo no valida solo en un
@@ -73,6 +77,12 @@ def create_course(teacher, *, career_id, name, year, term):
             {"career_id": "El docente no forma parte de la institucion de esa carrera."}
         )
 
+    subject = selectors.subject(subject_id)
+    if subject.career_id != career.id:
+        raise ValidationError(
+            {"subject_id": "La materia no pertenece a la carrera de la cursada."}
+        )
+
     if term not in CourseTerm.values:
         raise ValidationError(
             {"term": f"Periodo invalido. Opciones: {', '.join(CourseTerm.values)}."}
@@ -86,6 +96,7 @@ def create_course(teacher, *, career_id, name, year, term):
 
     return Course.objects.create(
         career=career,
+        subject=subject,
         teacher=teacher,
         name=name,
         year=year,

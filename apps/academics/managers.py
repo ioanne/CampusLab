@@ -45,7 +45,7 @@ class CourseQuerySet(models.QuerySet):
         return self.filter(career__institution=institution)
 
     def with_related(self):
-        return self.select_related("career__institution", "teacher")
+        return self.select_related("career__institution", "subject", "teacher")
 
 
 class StudentQuerySet(models.QuerySet):
