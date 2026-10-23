@@ -1,11 +1,15 @@
 from ninja import NinjaAPI
- 
+
+from apps.academics.api import (
+    institution_router as academics_institution_router,
+    public_router as careers_router,
+    teacher_router as academics_teacher_router,
+)
 from apps.accounts.api import (
     admin_router as users_admin_router,
     me_router,
     public_router as auth_router,
 )
-
 from apps.catalogs.api import public_router as catalogs_router
 from apps.institutions.api import (
     admin_router as institutions_admin_router,
@@ -13,8 +17,12 @@ from apps.institutions.api import (
     public_router as institutions_router,
     teacher_router as institutions_teacher_router,
 )
- 
- 
+from apps.projects.api import (
+    institution_router as projects_institution_router,
+    public_router as catalog_router,
+    teacher_router as projects_teacher_router,
+)
+
 api = NinjaAPI(
     title="Banco de Proyectos API",
     version="1.0.0",
@@ -27,13 +35,13 @@ api = NinjaAPI(
         "sin iniciar sesion. Autenticacion JWT, roles y carga de archivos."
     ),
 )
- 
- 
+
+
 @api.get("/health", tags=["Sistema"])
 def healthcheck(request):
     return {"status": "ok"}
- 
- 
+
+
 # Cada app trae sus routers y este archivo decide bajo que prefijo se cuelgan.
 # El prefijo dice a quien le corresponde cada grupo de operaciones:
 #   sin prefijo   -> lectura publica y registros, sin token
@@ -43,11 +51,17 @@ def healthcheck(request):
 #   /admin        -> gestion reservada al administrador
 # Que varios routers compartan prefijo no es problema: lo que no se puede
 # repetir es la ruta completa.
-api.add_router("/auth", me_router)
-api.add_router("/admin", users_admin_router)
 api.add_router("/auth", auth_router)
+api.add_router("/auth", me_router)
 api.add_router("/teacher", institutions_teacher_router)
+api.add_router("/teacher", academics_teacher_router)
+api.add_router("/teacher", projects_teacher_router)
 api.add_router("/institution", institutions_institution_router)
+api.add_router("/institution", academics_institution_router)
+api.add_router("/institution", projects_institution_router)
+api.add_router("/admin", users_admin_router)
 api.add_router("/admin", institutions_admin_router)
 api.add_router("", institutions_router)
+api.add_router("", careers_router)
 api.add_router("", catalogs_router)
+api.add_router("", catalog_router)
