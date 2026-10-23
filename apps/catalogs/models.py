@@ -1,7 +1,6 @@
 from django.db import models
 
 
-
 class Technology(models.Model):
     """Tecnologia usada por un proyecto: Python, Django, React, PostgreSQL.
 
