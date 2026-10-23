@@ -20,6 +20,16 @@ class CareerQuerySet(models.QuerySet):
         return self.select_related("institution")
 
 
+class SubjectQuerySet(models.QuerySet):
+    """Filtros de materias."""
+
+    def of_career(self, career):
+        return self.filter(career=career)
+
+    def with_career(self):
+        return self.select_related("career__institution")
+
+
 class CourseQuerySet(models.QuerySet):
     """Filtros de cursadas."""
 

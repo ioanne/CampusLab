@@ -7,10 +7,18 @@ pruebas y las demas heredan de ella.
 import json
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.test import TestCase
 
 from apps.academics import selectors
-from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student
+from apps.academics.models import (
+    Career,
+    Course,
+    CourseStudent,
+    CourseTerm,
+    Student,
+    Subject,
+)
 from apps.accounts.models import UserRole
 from apps.institutions.models import (
     Institution,
@@ -57,6 +65,7 @@ class AcademicsTestCase(TestCase):
             institution=self.institution,
             name="Desarrollo de Software",
         )
+        self.subject = Subject.objects.create(career=self.career, name="Programacion I")
 
     def _login(self, email, password):
         response = self.client.post(
@@ -112,6 +121,13 @@ class CareerApiTests(AcademicsTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Career.objects.filter(institution=self.institution).count(), 1)
+
+
+class SubjectModelTests(AcademicsTestCase):
+    def test_subject_name_is_unique_within_its_career(self):
+        """La base sostiene la regla aunque alguien saltee el service."""
+        with self.assertRaises(IntegrityError):
+            Subject.objects.create(career=self.career, name="Programacion I")
 
 
 class CourseApiTests(AcademicsTestCase):
