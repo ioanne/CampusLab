@@ -18,6 +18,16 @@ class CareerOut(Schema):
         return obj.institution.name
 
 
+class SubjectIn(Schema):
+    name: str
+
+
+class SubjectOut(Schema):
+    id: int
+    name: str
+    career_id: int
+
+
 class CourseIn(Schema):
     """Lo que manda el docente para abrir una cursada.
 

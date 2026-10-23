@@ -5,7 +5,7 @@ otros. La API los llama y devuelve lo que sale; nunca escribe un filter propio.
 """
 from django.shortcuts import get_object_or_404
 
-from apps.academics.models import Career, Course, CourseStudent, Student
+from apps.academics.models import Career, Course, CourseStudent, Student, Subject
 
 
 def careers(institution_id=None, search=None):
@@ -20,6 +20,11 @@ def careers(institution_id=None, search=None):
 
 def career(career_id):
     return get_object_or_404(Career.objects.with_institution(), pk=career_id)
+
+
+def subjects_of_career(career):
+    """Las materias de una carrera: lo que la institucion gestiona."""
+    return Subject.objects.of_career(career).with_career()
 
 
 def courses_of_teacher(teacher):

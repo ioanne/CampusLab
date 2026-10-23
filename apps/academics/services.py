@@ -10,7 +10,14 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.academics import selectors
-from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student
+from apps.academics.models import (
+    Career,
+    Course,
+    CourseStudent,
+    CourseTerm,
+    Student,
+    Subject,
+)
 from apps.accounts.models import UserRole
 from apps.institutions import selectors as institutions_selectors
 
@@ -26,6 +33,21 @@ def create_career(institution, *, name):
     if Career.objects.of_institution(institution).filter(name__iexact=name).exists():
         raise ValidationError({"name": "La institucion ya tiene una carrera con ese nombre."})
     return Career.objects.create(institution=institution, name=name)
+
+
+def create_subject(career, *, name):
+    """Alta de una materia de la carrera.
+
+    Mismo criterio que create_career: el nombre se compara sin distinguir
+    mayusculas, porque "Programacion I" y "programacion i" son la misma materia
+    y la restriccion de la base, que compara tal cual, no lo notaria.
+    """
+    name = name.strip()
+    if not name:
+        raise ValidationError({"name": "La materia necesita un nombre."})
+    if Subject.objects.of_career(career).filter(name__iexact=name).exists():
+        raise ValidationError({"name": "La carrera ya tiene una materia con ese nombre."})
+    return Subject.objects.create(career=career, name=name)
 
 
 def create_course(teacher, *, career_id, name, year, term):

@@ -130,6 +130,90 @@ class SubjectModelTests(AcademicsTestCase):
             Subject.objects.create(career=self.career, name="Programacion I")
 
 
+class SubjectApiTests(AcademicsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.access = self._login("rectoria@ifts18.edu.ar", "Rectoria12345!")
+
+    def _url(self, career):
+        return f"/api/institution/careers/{career.id}/subjects"
+
+    def _get(self, url):
+        return self.client.get(url, HTTP_AUTHORIZATION=f"Bearer {self.access}")
+
+    def test_institution_creates_a_subject_in_its_career(self):
+        response = self._post(self._url(self.career), {"name": "  Base de Datos "}, self.access)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "Base de Datos")
+        self.assertEqual(response.json()["career_id"], self.career.id)
+        self.assertTrue(
+            Subject.objects.filter(career=self.career, name="Base de Datos").exists()
+        )
+
+    def test_subject_name_cannot_repeat_in_the_same_career(self):
+        """Mismo criterio que la carrera: no distingue mayusculas ni espacios de mas."""
+        response = self._post(self._url(self.career), {"name": " programacion i "}, self.access)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Subject.objects.filter(career=self.career).count(), 1)
+
+    def test_the_same_subject_name_is_fine_in_another_career(self):
+        """Cada carrera tiene su plan: las dos pueden dictar Programacion I."""
+        other_career = Career.objects.create(
+            institution=self.institution, name="Analisis de Sistemas"
+        )
+
+        response = self._post(self._url(other_career), {"name": "Programacion I"}, self.access)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_blank_name_is_rejected(self):
+        response = self._post(self._url(self.career), {"name": "   "}, self.access)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Subject.objects.filter(career=self.career).count(), 1)
+
+    def test_institution_lists_only_the_subjects_of_that_career(self):
+        other_career = Career.objects.create(
+            institution=self.institution, name="Analisis de Sistemas"
+        )
+        Subject.objects.create(career=other_career, name="Base de Datos")
+
+        response = self._get(self._url(self.career))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([s["name"] for s in response.json()], ["Programacion I"])
+
+    def test_a_career_of_another_institution_is_forbidden(self):
+        other_institution = Institution.objects.create(name="IFTS 24", city="CABA")
+        foreign_career = Career.objects.create(
+            institution=other_institution, name="Desarrollo de Software"
+        )
+
+        listing = self._get(self._url(foreign_career))
+        creation = self._post(self._url(foreign_career), {"name": "Programacion I"}, self.access)
+
+        self.assertEqual(listing.status_code, 403)
+        self.assertEqual(creation.status_code, 403)
+        self.assertFalse(Subject.objects.filter(career=foreign_career).exists())
+
+    def test_admin_manages_the_subjects_of_any_career(self):
+        """El administrador no representa a ninguna institucion: destraba."""
+        self.user_model.objects.create_user(
+            email="admin@campuslab.edu.ar",
+            password="Admin12345!",
+            first_name="Ada",
+            last_name="Admin",
+            role=UserRole.ADMIN,
+        )
+        self.access = self._login("admin@campuslab.edu.ar", "Admin12345!")
+
+        response = self._post(self._url(self.career), {"name": "Base de Datos"}, self.access)
+
+        self.assertEqual(response.status_code, 200)
+
+
 class CourseApiTests(AcademicsTestCase):
     def test_member_teacher_creates_course(self):
         access = self._login("diana@docentes.edu.ar", "Docente12345!")
