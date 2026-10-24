@@ -446,6 +446,60 @@ class ProjectFilesAndLinksTests(ProjectScenario):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_a_text_file_renamed_to_png_is_rejected(self):
+        """1. Subir un .txt renombrado a .png debe responder 400."""
+        falso_png = SimpleUploadedFile(
+            "nota.png",
+            b"Esto es texto plano disfrazado de imagen",
+            "image/png",
+        )
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": falso_png,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("file", json.dumps(response.json()))
+    
+    def test_an_image_exceeding_max_size_is_rejected(self):
+        """2. Un archivo que supera el límite de 5 MB debe responder 400."""
+        # Creamos un archivo simulado de 6 MB
+        archivo_pesado = SimpleUploadedFile(
+            "gigante.png",
+            b"0" * (6 * 1024 * 1024),
+            "image/png",
+        )
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": archivo_pesado,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("file", json.dumps(response.json()))
+    
+    def test_first_uploaded_image_becomes_cover_automatically(self):
+        """3. La primera imagen subida queda como portada aunque no se pida explícitamente."""
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "title": "Primera imagen",
+                "is_cover": "false",  # Aunque venga en false...
+                "file": SimpleUploadedFile("primera.png", PNG_DE_UN_PIXEL, "image/png"),
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["is_cover"])
+    
+
+
 
 class ProjectReviewTests(ProjectScenario):
     """La revision de la institucion."""

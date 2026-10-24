@@ -12,6 +12,7 @@ API, con core.errors.validation_error.
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.conf import settings
 
 from apps.academics import selectors as academics_selectors
 from apps.catalogs import selectors as catalogs_selectors
@@ -27,6 +28,13 @@ from apps.projects.models import (
     ProjectTechnology,
 )
 
+def _validate_image(file):
+        # Consume la configuración centralizada de Django
+        if file.size > settings.MAX_IMAGE_SIZE_BYTES:
+            raise ValidationError({
+                "file": f"La imagen supera el tamaño máximo permitido de {settings.MAX_IMAGE_SIZE_MB} MB."
+            })
+        # ... validación con Pillow ...
 
 def _students_of_course(course, student_ids):
     """Resuelve los alumnos del proyecto y controla que sean de esa cursada.
