@@ -7,8 +7,9 @@ pruebas y las demas heredan de ella.
 import json
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
-from django.test import TestCase
+from django.db import IntegrityError, connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase
 
 from apps.academics import selectors
 from apps.academics.models import (
@@ -480,3 +481,74 @@ class EnrollmentApiTests(AcademicsTestCase):
         )
 
         self.assertEqual(list(found), [enrolled])
+
+
+class UnassignedSubjectMigrationTests(TransactionTestCase):
+    """La migracion en dos pasos, sobre una base que ya tenia cursadas.
+
+    Corre las migraciones de verdad: vuelve academics a la 0002 (la columna
+    nullable), carga cursadas sin materia con los modelos de ese momento y
+    avanza hasta la 0004. Una migracion de datos no se puede probar de otra
+    forma: con los modelos de hoy la cursada sin materia ni siquiera se puede
+    crear.
+    """
+
+    before = [("academics", "0002_subject_course_subject")]
+    after = [("academics", "0004_alter_course_subject")]
+
+    def setUp(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.before)
+        old_apps = executor.loader.project_state(self.before).apps
+
+        Institution = old_apps.get_model("institutions", "Institution")
+        User = old_apps.get_model("accounts", "User")
+        Career = old_apps.get_model("academics", "Career")
+        Course = old_apps.get_model("academics", "Course")
+
+        institution = Institution.objects.create(name="IFTS 18")
+        teacher = User.objects.create(
+            email="diana@docentes.edu.ar",
+            first_name="Diana",
+            last_name="Docente",
+            role="TEACHER",
+        )
+        self.career_id = Career.objects.create(
+            institution=institution, name="Desarrollo de Software"
+        ).id
+        self.empty_career_id = Career.objects.create(
+            institution=institution, name="Analisis de Sistemas"
+        ).id
+        # Dos cursadas en la misma carrera: tienen que compartir una sola
+        # "Sin asignar", no una cada una.
+        for name in ["1C - Noche", "2C - Manana"]:
+            Course.objects.create(
+                career_id=self.career_id,
+                teacher=teacher,
+                name=name,
+                year=2025,
+                term="FIRST",
+            )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.after)
+        self.apps = executor.loader.project_state(self.after).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_each_career_with_courses_gets_one_unassigned_subject(self):
+        Subject = self.apps.get_model("academics", "Subject")
+        Course = self.apps.get_model("academics", "Course")
+
+        subjects = list(Subject.objects.filter(career_id=self.career_id))
+
+        self.assertEqual([subject.name for subject in subjects], ["Sin asignar"])
+        self.assertEqual(Course.objects.filter(subject=subjects[0]).count(), 2)
+        self.assertFalse(Course.objects.filter(subject__isnull=True).exists())
+
+    def test_a_career_without_courses_gets_no_filler_subject(self):
+        Subject = self.apps.get_model("academics", "Subject")
+
+        self.assertFalse(Subject.objects.filter(career_id=self.empty_career_id).exists())

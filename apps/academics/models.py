@@ -118,9 +118,6 @@ class Course(models.Model):
     subject = models.ForeignKey(
         Subject,
         on_delete=models.PROTECT,
-        # Paso 1 de la migracion: nullable para poder agregar la columna sobre
-        # cursadas que ya existen. La 0004 la vuelve obligatoria.
-        null=True,
         related_name="courses",
         verbose_name="materia",
     )
