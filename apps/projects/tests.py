@@ -9,12 +9,15 @@ transaccion que vuelve atras, el estado con el que nace un proyecto).
 import json
 import shutil
 import tempfile
+from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from PIL import Image
 
 from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student
 from apps.accounts.models import UserRole
@@ -463,6 +466,21 @@ class ProjectFilesAndLinksTests(ProjectScenario):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("file", json.dumps(response.json()))
+
+    def test_a_valid_gif_is_rejected_as_an_unsupported_format(self):
+        image_buffer = BytesIO()
+        Image.new("RGB", (1, 1), color="white").save(image_buffer, format="GIF")
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile(
+                    "captura.gif", image_buffer.getvalue(), "image/gif"
+                ),
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
     
     def test_an_image_exceeding_max_size_is_rejected(self):
         """2. Un archivo que supera el límite de 5 MB debe responder 400."""
@@ -490,13 +508,52 @@ class ProjectFilesAndLinksTests(ProjectScenario):
             data={
                 "asset_type": AssetType.IMAGE,
                 "title": "Primera imagen",
-                "is_cover": "false",  # Aunque venga en false...
                 "file": SimpleUploadedFile("primera.png", PNG_DE_UN_PIXEL, "image/png"),
             },
             headers=self.headers,
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["is_cover"])
+
+    @override_settings(MAX_IMAGES_PER_PROJECT=1)
+    def test_project_image_limit_is_enforced(self):
+        first_response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile("primera.png", PNG_DE_UN_PIXEL, "image/png"),
+            },
+            headers=self.headers,
+        )
+        second_response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile("segunda.png", PNG_DE_UN_PIXEL, "image/png"),
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 400)
+        self.assertEqual(self.project.assets.filter(asset_type=AssetType.IMAGE).count(), 1)
+
+    def test_uploaded_image_uses_uuid_filename_and_keeps_extension(self):
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile(
+                    "nombre enviado.png", PNG_DE_UN_PIXEL, "image/png"
+                ),
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        saved_name = Path(self.project.assets.get().file.name).name
+        self.assertEqual(Path(saved_name).suffix, ".png")
+        UUID(Path(saved_name).stem)
     
 
 
