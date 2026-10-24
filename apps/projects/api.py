@@ -48,12 +48,10 @@ institution_router = Router(
 
 
 def ensure_project_teacher(user, project):
-    """Permiso a nivel de objeto: cada docente toca solo los proyectos de sus
-    cursadas.
+    """Permiso a nivel de objeto: cada docente toca solo los proyectos de sus     cursadas.
 
     El router ya comprobo que sea docente; esto comprueba que sea EL docente.
-    Se pregunta por la cursada porque es donde vive el dato: el proyecto no
-    guarda a quien lo cargo, guarda en que comision se hizo.
+    Se pregunta por la cursada porque es donde vive el dato: el proyecto no guarda a quien lo cargo, guarda en que comision se hizo.
 
     Vive en la capa de API y no en el service a proposito: es una decision de
     autorizacion, no una regla del negocio. El comando que carga datos de
@@ -61,6 +59,13 @@ def ensure_project_teacher(user, project):
     """
     if user.role == UserRole.ADMIN:
         return
+    # queremos validar q la institucion sea la misma que, la del usuario, 
+
+    if course.career.institution_id != institution.id:
+        raise HttpError(403, "La cursada pertenece a otra institucion.")
+    # if user.role == UserRole.INSTITUTION: #
+    #     return
+
     if project.course.teacher_id != user.id:
         raise HttpError(403, "El proyecto es de la cursada de otro docente.")
 
@@ -116,7 +121,7 @@ def get_my_project(request, project_id: int):
 
     return selectors.full_project(project.pk)
 
-
+# el profe postea un proyecto, acá se crea y asigna un alumno
 @teacher_router.post("/projects", response=ProjectOut)
 def create_project(request, payload: ProjectCreateIn):
     """Carga un proyecto en una cursada del docente.
@@ -126,6 +131,7 @@ def create_project(request, payload: ProjectCreateIn):
     comision de otro.
     """
     course = academics_selectors.course(payload.course_id)
+    
     ensure_course_teacher(request.auth, course)
 
     try:
