@@ -8,6 +8,59 @@ from apps.academics.managers import (
     StudentQuerySet,
 )
 
+class Subject(models.Model):
+
+    institution = models.ForeignKey(
+        "institutions.Institution",
+        on_delete=models.CASCADE,
+        related_name="subjects",
+    )
+    name = models.CharField(max_length=180)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "materia"
+        verbose_name_plural = "materias"
+        ordering = ["institution__name", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["institution", "name"],
+                name="materia_unica_por_institucion",
+            )
+        ]
+
+    def _str_(self):
+        return f"{self.name} ({self.institution.name})"
+
+class CourseSubject(models.Model):
+
+    course = models.ForeignKey(
+        "Course",
+        on_delete=models.CASCADE,
+        related_name="subjects",
+    )
+    subject = models.ForeignKey(
+        "Subject",
+        on_delete=models.CASCADE,
+        related_name="courses",
+        verbose_name="materia",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "materia de cursada"
+        verbose_name_plural = "materias de cursadas"
+        ordering = ["subject__name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["course", "subject"],
+                name="materia_unica_por_cursada",
+            )
+        ]
+
+    def _str_(self):
+        return f"{self.subject.name} en {self.course}"
+
 
 class Career(models.Model):
     """Carrera de una institucion.
@@ -28,6 +81,9 @@ class Career(models.Model):
         related_name="careers",
     )
     name = models.CharField(max_length=180)
+
+
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = CareerQuerySet.as_manager()
@@ -43,7 +99,7 @@ class Career(models.Model):
             )
         ]
 
-    def __str__(self):
+    def _str_(self):
         return f"{self.name} ({self.institution.name})"
 
 
@@ -93,6 +149,14 @@ class Course(models.Model):
         choices=CourseTerm.choices,
         verbose_name="periodo",
     )
+
+    materia = models.ForeignKey(
+        Subject,
+        on_delete=models.PROTECT,
+        related_name="courses",
+        verbose_name="materia",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = CourseQuerySet.as_manager()
@@ -108,10 +172,8 @@ class Course(models.Model):
             )
         ]
 
-    def __str__(self):
-        return (
-            f"{self.career.name} - {self.name} ({self.year} {self.get_term_display()})"
-        )
+    def _str_(self):
+        return f"{self.career.name} - {self.name} ({self.year} {self.get_term_display()})"
 
     @property
     def institution(self):
@@ -173,7 +235,7 @@ class Student(models.Model):
             )
         ]
 
-    def __str__(self):
+    def _str_(self):
         return self.full_name
 
     @property
@@ -208,7 +270,7 @@ class CourseStudent(models.Model):
     class Meta:
         verbose_name = "alumno de cursada"
         verbose_name_plural = "alumnos de cursadas"
-        ordering = ["student__last_name", "student__first_name"]
+        ordering = ["student_last_name", "student_first_name"]
         constraints = [
             models.UniqueConstraint(
                 fields=["course", "student"],
@@ -216,5 +278,5 @@ class CourseStudent(models.Model):
             )
         ]
 
-    def __str__(self):
+    def _str_(self):
         return f"{self.student.full_name} en {self.course}"
