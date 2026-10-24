@@ -782,3 +782,26 @@ class PublicCatalogTests(ProjectScenario):
         self.assertEqual(
             [p.title for p in selectors.public_catalog(filtros)], ["Museo Virtual"]
         )
+
+
+class ProjectSubjectTests(ProjectScenario):
+    def test_the_project_answers_its_subject_through_the_course(self):
+        """El proyecto no guarda la materia y sin embargo la sabe."""
+        project = self._create_project()
+
+        self.assertEqual(project.subject, self.subject)
+
+    def test_the_public_ficha_shows_the_subject_of_its_course(self):
+        project = self._create_project()
+
+        response = self.client.get(f"/api/projects/{project.slug}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["course"]["subject"]["name"], "Programacion I")
+
+    def test_the_subject_comes_with_the_project_without_extra_queries(self):
+        """with_related trae la materia en la misma consulta que la cursada."""
+        project = selectors.full_project(self._create_project().id)
+
+        with self.assertNumQueries(0):
+            self.assertEqual(project.subject.name, "Programacion I")
