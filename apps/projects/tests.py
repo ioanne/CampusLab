@@ -276,8 +276,27 @@ class ProjectUploadTests(ProjectScenario):
         self.assertEqual(body["repository_url"], "")
         self.assertEqual(body["technologies"], [])
 
-    def test_the_repository_has_to_be_github(self):
-        response = self._post_project(repository_url="https://gitlab.com/ifts/museo")
+    def test_the_repository_has_to_be_github_gitlab_or_bitbucket(self):
+        for url in (
+            "https://github.com/ifts/museo",
+            "https://gitlab.com/ifts/museo",
+            "https://www.bitbucket.org/ifts/museo",
+        ):
+            with self.subTest(url=url):
+                response = self._post_project(repository_url=url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["repository_url"], url)
+
+    def test_the_repository_has_to_be_an_allowed_host(self):
+        response = self._post_project(repository_url="https://codeberg.org/ifts/museo")
+        self.assertEqual(response.status_code, 400)
+        body = json.dumps(response.json())
+        self.assertIn("repository_url", body)
+        for host in ("github.com", "gitlab.com", "bitbucket.org"):
+            self.assertIn(host, body)
+
+    def test_the_repository_has_to_be_https(self):
+        response = self._post_project(repository_url="http://github.com/ifts/museo")
         self.assertEqual(response.status_code, 400)
         self.assertIn("repository_url", json.dumps(response.json()))
 

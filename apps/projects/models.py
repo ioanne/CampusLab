@@ -109,7 +109,7 @@ class Project(models.Model):
     repository_url = models.URLField(
         blank=True,
         verbose_name="repositorio",
-        help_text="El repositorio de GitHub del trabajo.",
+        help_text="El repositorio del trabajo (GitHub, GitLab o Bitbucket).",
     )
     status = models.CharField(
         max_length=10,
@@ -180,9 +180,16 @@ class Project(models.Model):
         super().clean()
         if self.repository_url:
             parsed = urlparse(self.repository_url)
-            if parsed.hostname not in {"github.com", "www.github.com"}:
+
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname not in settings.ALLOWED_REPOSITORY_HOSTS
+            ):
                 raise ValidationError(
-                    {"repository_url": "El repositorio debe pertenecer a GitHub."}
+                    {
+                        "repository_url": "El repositorio tiene que ser un link "
+                        f"https:// de alguno de estos dominios: {', '.join(settings.ALLOWED_REPOSITORY_HOSTS)}."
+                    }
                 )
 
     def review(self, status, *, reviewer=None, notes="", save=True):
