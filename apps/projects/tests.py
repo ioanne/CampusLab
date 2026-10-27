@@ -268,10 +268,42 @@ class ProjectUploadTests(ProjectScenario):
         self.assertEqual(body["repository_url"], "")
         self.assertEqual(body["technologies"], [])
 
-    def test_the_repository_has_to_be_github(self):
-        response = self._post_project(repository_url="https://gitlab.com/ifts/museo")
+    #ticket HU 05
+
+    def test_the_repository_can_be_from_github_gitlab_or_bitbucket(self):
+        #Criterio de aceptacion: se aceptan los tres dominios.
+        urls_validas = [
+            "https://github.com/ifts/museo",
+            "https://www.github.com/ifts/museo",  # con www
+            "https://gitlab.com/ifts/museo",
+            "https://bitbucket.org/ifts/museo",
+        ]
+        for url in urls_validas:
+            with self.subTest(url=url):
+                response = self._post_project(repository_url=url)
+                self.assertEqual(
+                    response.status_code, 200,
+                    msg=f"La URL {url} deberia ser valida pero fallo: {response.json()}"
+                )
+    def test_a_repository_from_another_domain_is_rejected(self):
+        """Criterio de aceptacion: otro dominio da 400 y el mensaje lista los aceptados."""
+        response = self._post_project(repository_url="https://mi-sitio-falso.com/repo")
+        self.assertEqual(response.status_code, 400)
+
+        # El error viaja dentro de 'detail' como string, no como dict por campo.
+        mensaje = json.dumps(response.json())
+        self.assertIn("repository_url", mensaje)
+        self.assertIn("github.com", mensaje)
+        self.assertIn("gitlab.com", mensaje)
+        self.assertIn("bitbucket.org", mensaje)          
+    
+
+    def test_the_repository_must_use_https(self):
+        """Criterio de aceptacion: tiene que ser https://."""
+        response = self._post_project(repository_url="http://github.com/ifts/museo")
         self.assertEqual(response.status_code, 400)
         self.assertIn("repository_url", json.dumps(response.json()))
+
 
     def test_a_project_needs_at_least_one_student(self):
         response = self._post_project(student_ids=[])

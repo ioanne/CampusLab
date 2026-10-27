@@ -131,3 +131,10 @@ AUTH_USER_MODEL = "accounts.User"
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
+# punto del ticket HU 05
+ALLOWED_REPOSITORY_HOSTS = [
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org"
+]
+

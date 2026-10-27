@@ -159,26 +159,52 @@ class Project(models.Model):
 
     @property
     def teacher(self):
-        """Quien lo cargo es el docente de la cursada, y por eso no hay un campo
-        propio que pueda quedar apuntando a otra persona."""
+        #Quien lo cargo es el docente de la cursada, y por eso no hay un campo propio que pueda quedar apuntando a otra persona.
+        
         return self.course.teacher
 
     @property
     def is_approved(self):
         return self.status == ProjectStatus.APPROVED
 
-    def clean(self):
-        """Lo que se puede comprobar mirando solo este proyecto.
+  
 
-        Las reglas que necesitan otras tablas (que los alumnos esten inscriptos
-        en la cursada, por ejemplo) no viven aca: se preguntan en el service,
-        que es el que tiene el panorama completo y la transaccion abierta.
-        """
+        #AU 05
+    def clean(self):
+        
+        #Lo que se puede comprobar mirando solo este proyecto. Las reglas que necesitan otras tablas (que los alumnos esten inscriptos
+        #en la cursada, por ejemplo) no viven aca: se preguntan en el service, que es el que tiene el panorama completo y la transaccion abierta.    
         super().clean()
+
         if self.repository_url:
+            # 1. Validar que sea HTTPS (Criterio de aceptación 2)
+            if not self.repository_url.startswith("https://"):
+                raise ValidationError({
+                    "repository_url": "El repositorio debe usar https://."
+                })
+
             parsed = urlparse(self.repository_url)
-            if parsed.hostname not in {"github.com", "www.github.com"}:
-                raise ValidationError({"repository_url": "El repositorio debe pertenecer a GitHub."})
+            hostname = parsed.hostname or ""  # Evita errores si la URL es rara
+
+            # 2. Traer la lista desde settings (Criterio de aceptación 1)
+            allowed_hosts = getattr(settings, "ALLOWED_REPOSITORY_HOSTS", [])
+
+            # 3. Validar el dominio, permitiendo subdominios (ej: www.github.com)
+            is_valid = any(
+                hostname == allowed or hostname.endswith("." + allowed)
+                for allowed in allowed_hosts
+            )
+
+            # 4. Lanzar error con mensaje claro si falla (Criterio de aceptación 3)
+            if not is_valid:
+                hosts_str = ", ".join(allowed_hosts)
+                raise ValidationError({
+                    "repository_url": f"El repositorio debe pertenecer a uno de los siguientes dominios: {hosts_str}."
+                })
+
+
+
+
 
     def review(self, status, *, reviewer=None, notes="", save=True):
         """Guarda la decision de la revision: que se resolvio, quien y cuando.
