@@ -49,6 +49,7 @@ def ensure_course_of_institution(user, course):
     Es la misma pregunta de arriba, para el otro actor. La hace projects cuando
     la institucion carga un proyecto directo, sin pasar por el docente.
     """
+    
     if user.role == UserRole.ADMIN:
         return
     institution = current_institution(user)
@@ -83,11 +84,26 @@ def create_career(request, payload: CareerIn):
     except ValidationError as exc:
         raise validation_error(exc) from exc
 
+@institution_router.post("/courses/{course_id}/students", response=EnrollmentOut)
+def enroll_students_as_institution(request, course_id: int, payload: EnrollStudentIn):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    try:
+        return services.enroll_student(course, **payload.model_dump())
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
 
 @institution_router.get("/courses", response=list[CourseOut])
 def list_institution_courses(request):
     institution = current_institution(request.auth)
     return selectors.courses_of_institution(institution)
+    
+@institution_router.get("/courses/{course_id}/students", response=list[EnrollmentOut])
+def list_institution_course_students(request, course_id: int):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    return selectors.enrollments_of_course(course)
 
 @institution_router.get("/courses/{course_id}/teams", response=list[TeamOut])
 def list_institution_course_teams(request, course_id: int):
@@ -125,7 +141,19 @@ def delete_institution_team(request, course_id: int, team_id: int):
         raise validation_error(exc) from exc
     return {"success": True}
 
+@institution_router.delete("/courses/{course_id}/students/{enrollment_id}")
+def remove_enrollment_as_institution(request, course_id: int, enrollment_id: int):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
 
+    # La inscripcion se busca dentro de la cursada: un id de otra comision da
+    # 404 y no llega nunca al service.
+    enrollment = selectors.enrollment(course, enrollment_id)
+    try:
+        services.remove_enrollment(enrollment)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
 # --------------------------------------------------------------------------
 # Docente
 # --------------------------------------------------------------------------
