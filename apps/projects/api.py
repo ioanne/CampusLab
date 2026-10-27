@@ -46,7 +46,7 @@ institution_router = Router(
     tags=["Proyectos de mi institucion"], auth=institution_or_admin
 )
 
-
+'''
 def ensure_project_teacher(user, project):
     """Permiso a nivel de objeto: cada docente toca solo los proyectos de sus     cursadas.
 
@@ -61,6 +61,7 @@ def ensure_project_teacher(user, project):
         return
     # queremos validar q la institucion sea la misma que, la del usuario, 
 
+
     if course.career.institution_id != institution.id:
         raise HttpError(403, "La cursada pertenece a otra institucion.")
     # if user.role == UserRole.INSTITUTION: #
@@ -68,6 +69,7 @@ def ensure_project_teacher(user, project):
 
     if project.course.teacher_id != user.id:
         raise HttpError(403, "El proyecto es de la cursada de otro docente.")
+'''
 
 
 def ensure_project_of_institution(user, project):
@@ -77,6 +79,56 @@ def ensure_project_of_institution(user, project):
     carrera. Por eso se contesta con la misma funcion, y no con una copia.
     """
     ensure_course_of_institution(user, project.course)
+
+
+# Historia de Usuario - 02 - Equipo 3
+
+
+def ensure_can_edit_project(user, project):
+    """Permiso a nivel de objeto sobre un proyecto.
+
+    - Admin: puede todo.
+    - Institucion: los proyectos de su institucion.
+    - Docente: los proyectos de sus cursadas.
+    """
+    if user.role == UserRole.ADMIN:
+        return
+    if user.role == UserRole.INSTITUTION:
+        # validamos que el proyecto le pertenece a la institucion
+        ensure_project_of_institution(user, project)  # 403 si es de otra
+        return
+    if project.course.teacher_id != user.id:
+        raise HttpError(403, "El proyecto es de la cursada de otro docente.")
+
+
+# GET /api/institution/projects/{project_id} devuelve ProjectOut en cualquier estado.
+@institution_router.get("/projects/{project_id}", response=ProjectOut)
+def get_institution_project(request, project_id: int):
+    """La ficha completa de un proyecto de la institucion, en cualquier estado."""
+    project = selectors.project(project_id)
+    ensure_can_edit_project(request.auth, project)
+    return selectors.full_project(project.pk)
+
+# PATCH /api/institution/projects/{project_id} acepta ProjectUpdateIn.
+@institution_router.patch("/projects/{project_id}", response=ProjectOut)
+def update_institution_project(request, project_id: int, payload: ProjectUpdateIn):
+    """Edita un proyecto de la institucion: queda aprobado y firmado por ella."""
+    project = selectors.project(project_id)
+    ensure_can_edit_project(request.auth, project)
+
+    try:
+        services.update_project(
+            project,
+            changes=payload.model_dump(exclude_unset=True),
+            reviewer=request.auth,
+        )
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+    return selectors.full_project(project.pk)
+
+
+# Historia de Usuario - 02 - Equipo 3
 
 
 # --------------------------------------------------------------------------
@@ -117,9 +169,14 @@ def get_my_project(request, project_id: int):
     que no la incluye.
     """
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    # # ensure_project_teacher(request.auth, project)
+
+    ensure_can_edit_project(request.auth, project)
+
+    ensure_can_edit_project(request.auth, project)
 
     return selectors.full_project(project.pk)
+
 
 # el profe postea un proyecto, acá se crea y asigna un alumno
 @teacher_router.post("/projects", response=ProjectOut)
@@ -131,7 +188,7 @@ def create_project(request, payload: ProjectCreateIn):
     comision de otro.
     """
     course = academics_selectors.course(payload.course_id)
-    
+
     ensure_course_teacher(request.auth, course)
 
     try:
@@ -145,7 +202,11 @@ def create_project(request, payload: ProjectCreateIn):
 @teacher_router.patch("/projects/{project_id}", response=ProjectOut)
 def update_project(request, project_id: int, payload: ProjectUpdateIn):
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    # # ensure_project_teacher(request.auth, project)
+
+    ensure_can_edit_project(request.auth, project)
+
+    ensure_can_edit_project(request.auth, project)
 
     try:
         # exclude_unset deja solo los campos que el cliente mando de verdad: sin
@@ -172,7 +233,9 @@ def upload_asset(
     parametros se declaran con Form(...) y File(...) en vez de con un schema.
     """
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    # ensure_project_teacher(request.auth, project)
+
+    ensure_can_edit_project(request.auth, project)
 
     try:
         return services.upload_asset(
@@ -189,7 +252,8 @@ def upload_asset(
 @teacher_router.delete("/projects/{project_id}/assets/{asset_id}")
 def delete_asset(request, project_id: int, asset_id: int):
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    # ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     services.delete_asset(selectors.asset(project, asset_id))
     return {"success": True}
@@ -199,7 +263,9 @@ def delete_asset(request, project_id: int, asset_id: int):
 def add_link(request, project_id: int, payload: ProjectLinkIn):
     """Suma el repositorio, la demo, el video o lo que el trabajo tenga afuera."""
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+
+    # ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     try:
         return services.add_link(project, **payload.model_dump())
@@ -210,7 +276,9 @@ def add_link(request, project_id: int, payload: ProjectLinkIn):
 @teacher_router.delete("/projects/{project_id}/links/{link_id}")
 def delete_link(request, project_id: int, link_id: int):
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+
+    # ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     services.delete_link(selectors.link(project, link_id))
     return {"success": True}

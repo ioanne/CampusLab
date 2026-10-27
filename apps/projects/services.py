@@ -130,6 +130,7 @@ def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **d
     return project
 
 
+'''
 @transaction.atomic
 def update_project(project, *, changes):
     """Aplica solo lo que vino y vuelve el proyecto a la cola de revision.
@@ -158,6 +159,33 @@ def update_project(project, *, changes):
     project.status = _initial_status(project.course)
     project.reviewed_by = None
     project.reviewed_at = None
+    project.save()
+
+    if technology_ids is not None:
+        replace_technologies(project, technology_ids)
+    if student_ids is not None:
+        replace_students(project, _students_of_course(project.course, student_ids))
+    return project
+'''
+
+
+@transaction.atomic
+def update_project(project, *, changes, reviewer=None):
+    """
+    `reviewer` es la institucion, cuando es ella la que edita. Su edicion no vuelve a PENDING: queda aprobada y firmada por ella, igual que cuando carga.
+    """
+    technology_ids = changes.pop("technology_ids", None)
+    student_ids = changes.pop("student_ids", None)
+
+    for field, value in changes.items():
+        setattr(project, field, value)
+
+    if reviewer is not None:
+        project.review(ProjectStatus.APPROVED, reviewer=reviewer, save=False)
+    else:
+        project.status = _initial_status(project.course)
+        project.reviewed_by = None
+        project.reviewed_at = None
     project.save()
 
     if technology_ids is not None:
