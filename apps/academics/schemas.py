@@ -75,3 +75,22 @@ class EnrollmentOut(Schema):
     id: int
     student: StudentOut
     created_at: datetime
+
+
+class TeamCreateIn(Schema):
+    name: str
+    student_ids: list[int]
+
+class TeamUpdateIn(Schema):
+    name: str | None = None
+    student_ids: list[int] | None = None
+
+class TeamMemberOut(Schema):
+    id: int
+    student_id: int
+    student_name: str
+
+class TeamOut(Schema):
+    id: int
+    name: str
+    members: list[TeamMemberOut] = []

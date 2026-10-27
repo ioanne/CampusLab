@@ -66,3 +66,11 @@ def students_enrolled_in_course(course, student_ids):
     return Student.objects.filter(
         enrollments__course=course, id__in=student_ids
     ).distinct()
+
+def teams_of_course(course):
+    """Devuelve todos los equipos de una cursada."""
+    return course.teams.all()
+
+def team(course, team_id):
+    """Busca un equipo específico asegurando que pertenezca a la cursada."""
+    return course.teams.get(id=team_id)

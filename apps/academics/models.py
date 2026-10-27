@@ -218,3 +218,21 @@ class CourseStudent(models.Model):
 
     def __str__(self):
         return f"{self.student.full_name} en {self.course}"
+
+class Team(models.Model):
+    course = models.ForeignKey("Course", on_delete=models.CASCADE, related_name="teams")
+    name = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = ("course", "name")
+
+    def __str__(self):
+        return f"{self.name} ({self.course})"
+
+
+class TeamMember(models.Model):
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="members")
+    student = models.ForeignKey("Student", on_delete=models.CASCADE, related_name="team_memberships")
+
+    class Meta:
+        unique_together = ("team", "student")

@@ -10,7 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.academics import selectors
-from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student
+from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student, Team, TeamMember
 from apps.accounts.models import UserRole
 from apps.institutions import selectors as institutions_selectors
 
@@ -135,6 +135,15 @@ def remove_enrollment(enrollment):
     se escribe antes que projects: sin alumnos en ningun proyecto, no hay nada
     que impida la baja.
     """
+    if TeamMember.objects.filter(team__course=enrollment.course, student=enrollment.student).exists():
+        raise ValidationError(
+            {
+                "enrollment_id": (
+                    "El alumno pertenece a un equipo de esta cursada: primero hay que "
+                    "sacarlo del equipo."
+                )
+            }
+        )
     participations = getattr(enrollment.student, "project_participations", None)
     if participations is not None and participations.filter(project__course=enrollment.course).exists():
         raise ValidationError(
@@ -145,4 +154,108 @@ def remove_enrollment(enrollment):
                 )
             }
         )
+    
     enrollment.delete()
+    
+
+@transaction.atomic
+def create_team(course_id: int, *, name: str, student_ids: list[int]) -> Team:
+    """Crea un equipo en una cursada validando que los alumnos estén inscriptos
+    y que no pertenezcan ya a otro equipo de la misma cursada.
+    """
+    name = name.strip()
+    if not name:
+        raise ValidationError({"name": "El equipo necesita un nombre."})
+
+    if Team.objects.filter(course_id=course_id, name=name).exists():
+        raise ValidationError({"name": f"Ya existe un equipo con el nombre '{name}' en esta cursada."})
+
+    enrolled_students = set(
+        CourseStudent.objects.filter(course_id=course_id, student_id__in=student_ids)
+        .values_list("student_id", flat=True)
+    )
+    
+    for s_id in student_ids:
+        if s_id not in enrolled_students:
+            raise ValidationError(
+                {"student_ids": f"El alumno con ID {s_id} no está inscripto en esta cursada."}
+            )
+        
+        existing_membership = TeamMember.objects.filter(
+            team__course_id=course_id,
+            student_id=s_id
+        ).first()
+        
+        if existing_membership:
+            raise ValidationError(
+                {
+                    "student_ids": (
+                        f"El alumno con ID {s_id} ya pertenece al equipo "
+                        f"'{existing_membership.team.name}' en esta cursada."
+                    )
+                }
+            )
+
+    team = Team.objects.create(course_id=course_id, name=name)
+    for s_id in student_ids:
+        TeamMember.objects.create(team=team, student_id=s_id)
+        
+    return team
+
+
+def delete_team(team_id: int):
+    """Da de baja un equipo validando que no tenga proyectos asociados."""
+    team = Team.objects.get(id=team_id)
+    
+    projects = getattr(team, "projects", None)
+    if projects is not None and projects.exists():
+        raise ValidationError(
+            {"team_id": "No se puede eliminar el equipo porque tiene proyectos asociados."}
+        )
+        
+    team.delete()
+
+
+
+@transaction.atomic
+def update_team(team, *, name: str = None, student_ids: list[int] = None):
+    """Actualiza el nombre de un equipo o reemplaza sus miembros validando restricciones."""
+    if name is not None:
+        name = name.strip()
+        if Team.objects.filter(course=team.course, name=name).exclude(id=team.id).exists():
+            raise ValidationError({"name": f"Ya existe otro equipo con el nombre '{name}' en esta cursada."})
+        team.name = name
+        team.save()
+
+    if student_ids is not None:
+
+        enrolled_students = set(
+            CourseStudent.objects.filter(course=team.course, student_id__in=student_ids)
+            .values_list("student_id", flat=True)
+        )
+        for s_id in student_ids:
+            if s_id not in enrolled_students:
+                raise ValidationError(
+                    {"student_ids": f"El alumno con ID {s_id} no está inscripto en esta cursada."}
+                )
+            
+            existing = TeamMember.objects.filter(
+                team__course=team.course,
+                student_id=s_id
+            ).exclude(team=team).first()
+            
+            if existing:
+                raise ValidationError(
+                    {
+                        "student_ids": (
+                            f"El alumno con ID {s_id} ya pertenece al equipo "
+                            f"'{existing.team.name}' en esta cursada."
+                        )
+                    }
+                )
+
+        team.members.all().delete()
+        for s_id in student_ids:
+            TeamMember.objects.create(team=team, student_id=s_id)
+
+    return team

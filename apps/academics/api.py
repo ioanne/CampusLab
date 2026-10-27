@@ -10,6 +10,10 @@ from apps.academics.schemas import (
     CourseOut,
     EnrollmentOut,
     EnrollStudentIn,
+    TeamCreateIn,
+    TeamUpdateIn,
+    TeamMemberOut,
+    TeamOut,
 )
 from apps.accounts.models import UserRole
 from apps.accounts.permissions import institution_or_admin, teacher_or_admin
@@ -85,6 +89,42 @@ def list_institution_courses(request):
     institution = current_institution(request.auth)
     return selectors.courses_of_institution(institution)
 
+@institution_router.get("/courses/{course_id}/teams", response=list[TeamOut])
+def list_institution_course_teams(request, course_id: int):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    return selectors.teams_of_course(course)
+
+@institution_router.post("/courses/{course_id}/teams", response=TeamOut)
+def create_institution_team(request, course_id: int, payload: TeamCreateIn):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    try:
+        return services.create_team(course_id=course_id, name=payload.name, student_ids=payload.student_ids)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+@institution_router.patch("/courses/{course_id}/teams/{team_id}", response=TeamOut)
+def update_institution_team(request, course_id: int, team_id: int, payload: TeamUpdateIn):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    team = selectors.team(course, team_id)
+    try:
+        return services.update_team(team, **payload.model_dump(exclude_unset=True))
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+@institution_router.delete("/courses/{course_id}/teams/{team_id}")
+def delete_institution_team(request, course_id: int, team_id: int):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    team = selectors.team(course, team_id)
+    try:
+        services.delete_team(team.id)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
+
 
 # --------------------------------------------------------------------------
 # Docente
@@ -130,6 +170,42 @@ def remove_enrollment(request, course_id: int, enrollment_id: int):
     enrollment = selectors.enrollment(course, enrollment_id)
     try:
         services.remove_enrollment(enrollment)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
+
+@teacher_router.get("/courses/{course_id}/teams", response=list[TeamOut])
+def list_course_teams(request, course_id: int):
+    course = selectors.course(course_id)
+    ensure_course_teacher(request.auth, course)
+    return selectors.teams_of_course(course)
+
+@teacher_router.post("/courses/{course_id}/teams", response=TeamOut)
+def create_team(request, course_id: int, payload: TeamCreateIn):
+    course = selectors.course(course_id)
+    ensure_course_teacher(request.auth, course)
+    try:
+        return services.create_team(course_id=course_id, name=payload.name, student_ids=payload.student_ids)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+@teacher_router.patch("/courses/{course_id}/teams/{team_id}", response=TeamOut)
+def update_team(request, course_id: int, team_id: int, payload: TeamUpdateIn):
+    course = selectors.course(course_id)
+    ensure_course_teacher(request.auth, course)
+    team = selectors.team(course, team_id)
+    try:
+        return services.update_team(team, **payload.model_dump(exclude_unset=True))
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+@teacher_router.delete("/courses/{course_id}/teams/{team_id}")
+def delete_team(request, course_id: int, team_id: int):
+    course = selectors.course(course_id)
+    ensure_course_teacher(request.auth, course)
+    team = selectors.team(course, team_id)
+    try:
+        services.delete_team(team.id)
     except ValidationError as exc:
         raise validation_error(exc) from exc
     return {"success": True}
