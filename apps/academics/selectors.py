@@ -66,3 +66,15 @@ def students_enrolled_in_course(course, student_ids):
     return Student.objects.filter(
         enrollments__course=course, id__in=student_ids
     ).distinct()
+
+def student(student_id):
+    """Busca un alumno por id, con sus links precargados. 
+    
+    El prefetch_related evita el problema N+1: en lugar de hacer 1 consulta
+    para el alumno y N para sus links, hace 2 en total.
+    """
+    return get_object_or_404(
+        Student.objects.prefetch_related("links"),
+        pk=student_id,
+    )
+

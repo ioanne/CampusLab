@@ -2,8 +2,10 @@ from ninja import NinjaAPI
 
 from apps.academics.api import (
     institution_router as academics_institution_router,
+    institution_students_router as academics_institution_students_router, #se agrega este router
     public_router as careers_router,
     teacher_router as academics_teacher_router,
+    teacher_students_router as academics_teacher_students_router, #se agrega este router
 )
 from apps.accounts.api import (
     admin_router as users_admin_router,
@@ -61,6 +63,8 @@ api.add_router("/institution", academics_institution_router)
 api.add_router("/institution", projects_institution_router)
 api.add_router("/admin", users_admin_router)
 api.add_router("/admin", institutions_admin_router)
+api.add_router("/teacher", academics_teacher_students_router)  # se agregó nuevo
+api.add_router("/institution", academics_institution_students_router)  #  se agregó nuevo
 api.add_router("", institutions_router)
 api.add_router("", careers_router)
 api.add_router("", catalogs_router)

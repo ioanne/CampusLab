@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from apps.academics import selectors
-from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student
+from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student, StudentLink
 from apps.accounts.models import UserRole
 from apps.institutions.models import (
     Institution,
@@ -72,6 +72,20 @@ class AcademicsTestCase(TestCase):
             url,
             data=json.dumps(payload),
             content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {access}",
+        )
+
+    def _patch(self, url, payload, access):
+        return self.client.patch(
+            url,
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {access}",
+        )
+
+    def _delete(self, url, access):
+        return self.client.delete(
+            url,
             HTTP_AUTHORIZATION=f"Bearer {access}",
         )
 
@@ -312,3 +326,222 @@ class EnrollmentApiTests(AcademicsTestCase):
         )
 
         self.assertEqual(list(found), [enrolled])
+
+
+class StudentLinkApiTests(AcademicsTestCase):
+    """HU-12: editar alumnos y sus links (docente e institucion)."""
+
+    def setUp(self):
+        super().setUp()
+        self.course = self._create_course()
+        # Inscribimos a Ana en la cursada del docente Diana
+        self.ana = Student.objects.create(
+            institution=self.institution,
+            first_name="Ana",
+            last_name="Gomez",
+            email="ana@alumnos.edu.ar",
+        )
+        CourseStudent.objects.create(course=self.course, student=self.ana)
+
+        self.teacher_access = self._login("diana@docentes.edu.ar", "Docente12345!")
+        self.institution_access = self._login("rectoria@ifts18.edu.ar", "Rectoria12345!")
+
+    # --- Helpers ---
+
+    def _create_other_teacher(self):
+        other_teacher = self.user_model.objects.create_user(
+            email="otro@docentes.edu.ar",
+            password="Docente12345!",
+            first_name="Omar",
+            last_name="Otro",
+            role=UserRole.TEACHER,
+        )
+        InstitutionTeacher.objects.create(
+            institution=self.institution,
+            teacher=other_teacher,
+            origin=MembershipOrigin.REQUEST,
+            status=MembershipStatus.ACCEPTED,
+        )
+        return other_teacher
+
+    # --- Tests que pide el ticket ---
+
+    def test_teacher_edits_student_of_his_course(self):
+        """El docente edita un alumno de su cursada: 200."""
+        response = self._patch(
+            f"/api/teacher/students/{self.ana.id}",
+            {"first_name": "Ana Maria"},
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.ana.refresh_from_db()
+        self.assertEqual(self.ana.first_name, "Ana Maria")
+
+    def test_teacher_cannot_edit_student_of_another_course(self):
+        """Un docente que NO tiene al alumno en sus cursadas: 403."""
+        self._create_other_teacher()
+        other_access = self._login("otro@docentes.edu.ar", "Docente12345!")
+
+        response = self._patch(
+            f"/api/teacher/students/{self.ana.id}",
+            {"first_name": "Hackeado"},
+            other_access,
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.ana.refresh_from_db()
+        self.assertEqual(self.ana.first_name, "Ana")
+
+    def test_linkedin_with_invalid_domain_returns_400(self):
+        """LinkedIn con URL de GitHub: 400."""
+        response = self._post(
+            f"/api/teacher/students/{self.ana.id}/links",
+            {
+                "link_type": "LINKEDIN",
+                "url": "https://github.com/ana-gomez",
+            },
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(StudentLink.objects.exists())
+
+    # --- Tests extra para cubrir los 5 criterios de aceptacion ---
+
+    def test_github_link_with_valid_domain_is_created(self):
+        """Criterio 2: GitHub con URL de github.com se crea bien."""
+        response = self._post(
+            f"/api/teacher/students/{self.ana.id}/links",
+            {
+                "link_type": "GITHUB",
+                "title": "Mi repo",
+                "url": "https://github.com/ana-gomez",
+            },
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["link_type"], "GITHUB")
+
+    def test_portfolio_accepts_any_valid_url(self):
+        """Criterio 2: PORTFOLIO acepta cualquier URL valida."""
+        response = self._post(
+            f"/api/teacher/students/{self.ana.id}/links",
+            {
+                "link_type": "PORTFOLIO",
+                "url": "https://anamaria.dev",
+            },
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_duplicate_link_is_rejected(self):
+        """Criterio 1: la URL es unica por alumno."""
+        url = f"/api/teacher/students/{self.ana.id}/links"
+        payload = {"link_type": "GITHUB", "url": "https://github.com/ana-gomez"}
+
+        primera = self._post(url, payload, self.teacher_access)
+        self.assertEqual(primera.status_code, 200)
+
+        repetida = self._post(url, payload, self.teacher_access)
+        self.assertEqual(repetida.status_code, 400)
+        self.assertEqual(StudentLink.objects.filter(student=self.ana).count(), 1)
+
+    def test_changing_email_to_one_already_used_returns_400(self):
+        """Criterio 4: el email es unico por institucion."""
+        Student.objects.create(
+            institution=self.institution,
+            first_name="Bruno",
+            last_name="Diaz",
+            email="bruno@alumnos.edu.ar",
+        )
+
+        response = self._patch(
+            f"/api/teacher/students/{self.ana.id}",
+            {"email": "bruno@alumnos.edu.ar"},
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.ana.refresh_from_db()
+        self.assertEqual(self.ana.email, "ana@alumnos.edu.ar")
+
+    def test_enroll_student_with_optional_links(self):
+        """Criterio 5: al inscribir, se pueden mandar links opcionales."""
+        response = self._post(
+            f"/api/teacher/courses/{self.course.id}/students",
+            {
+                "first_name": "Carla",
+                "last_name": "Ruiz",
+                "email": "carla@alumnos.edu.ar",
+                "links": [
+                    {
+                        "link_type": "GITHUB",
+                        "url": "https://github.com/carla-ruiz",
+                    },
+                    {
+                        "link_type": "LINKEDIN",
+                        "url": "https://linkedin.com/in/carla-ruiz",
+                    },
+                ],
+            },
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        carla = Student.objects.get(email="carla@alumnos.edu.ar")
+        self.assertEqual(carla.links.count(), 2)
+
+    def test_institution_can_edit_student_of_its_institution(self):
+        """Criterio 3: la institucion tambien puede editar."""
+        response = self._patch(
+            f"/api/institution/students/{self.ana.id}",
+            {"first_name": "Ana Maria"},
+            self.institution_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.ana.refresh_from_db()
+        self.assertEqual(self.ana.first_name, "Ana Maria")
+
+    def test_institution_cannot_edit_student_of_another_institution(self):
+        """Criterio 3: la institucion solo toca alumnos propios."""
+        otra_institucion = Institution.objects.create(name="IFTS 24", city="CABA")
+        otro_alumno = Student.objects.create(
+            institution=otra_institucion,
+            first_name="Delia",
+            last_name="Vera",
+            email="delia@alumnos.edu.ar",
+        )
+
+        response = self._patch(
+            f"/api/institution/students/{otro_alumno.id}",
+            {"first_name": "Hackeado"},
+            self.institution_access,
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_delete_link_of_another_student_returns_400(self):
+        """El service verifica que el link sea del alumno, no solo que exista."""
+        otro_alumno = Student.objects.create(
+            institution=self.institution,
+            first_name="Bruno",
+            last_name="Diaz",
+            email="bruno@alumnos.edu.ar",
+        )
+        link_ajeno = StudentLink.objects.create(
+            student=otro_alumno,
+            link_type="GITHUB",
+            url="https://github.com/bruno",
+        )
+
+        response = self._delete(
+            f"/api/teacher/students/{self.ana.id}/links/{link_ajeno.id}",
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(StudentLink.objects.filter(pk=link_ajeno.id).exists())

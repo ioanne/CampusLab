@@ -10,7 +10,12 @@ from apps.academics.schemas import (
     CourseOut,
     EnrollmentOut,
     EnrollStudentIn,
+    StudentOut,          # se agregó
+    StudentUpdateIn,     # agregado     
+    StudentLinkIn,       #agregado 
+    StudentLinkOut,      #agregado
 )
+from apps.academics.models import CourseStudent  # NUEVO: para validar inscripciones
 from apps.accounts.models import UserRole
 from apps.accounts.permissions import institution_or_admin, teacher_or_admin
 from apps.institutions.api import current_institution
@@ -25,6 +30,14 @@ institution_router = Router(tags=["Carreras de mi institucion"], auth=institutio
 
 # El docente administra sus cursadas y los alumnos de cada una.
 teacher_router = Router(tags=["Cursadas del docente"], auth=teacher_or_admin)
+
+# NUEVOS routers para editar alumnos y sus links.
+# Se separan por rol para respetar la convencion de prefijos del proyecto:
+# /teacher/students/... y /institution/students/...
+teacher_students_router = Router(tags=["Alumnos del docente"], auth=teacher_or_admin)
+institution_students_router = Router(
+    tags=["Alumnos de la institucion"], auth=institution_or_admin
+)
 
 
 def ensure_course_teacher(user, course):
@@ -52,18 +65,44 @@ def ensure_course_of_institution(user, course):
         raise HttpError(403, "La cursada pertenece a otra institucion.")
 
 
-# --------------------------------------------------------------------------
+# NUEVAS funciones de permiso para alumnos
+
+def ensure_teacher_can_touch_student(user, student):
+    """Un docente puede tocar a un alumno SOLO si esta inscripto en alguna de sus cursadas.
+
+    No importa el privilegio de publicacion: este ticket es explicito en que
+    la regla es "docente con el alumno inscripto en alguna de sus cursadas".
+    """
+    if user.role == UserRole.ADMIN:
+        return
+    tiene_inscripcion = CourseStudent.objects.filter(
+        student=student, course__teacher=user
+    ).exists()
+    if not tiene_inscripcion:
+        raise HttpError(403, "El alumno no esta inscripto en ninguna de tus cursadas.")
+
+
+def ensure_institution_can_touch_student(user, student):
+    """Una institucion puede tocar a un alumno SOLO si es de su institucion."""
+    if user.role == UserRole.ADMIN:
+        return
+    institution = current_institution(user)
+    if student.institution_id != institution.id:
+        raise HttpError(403, "El alumno pertenece a otra institucion.")
+
+
+
 # Publico
-# --------------------------------------------------------------------------
+
 
 @public_router.get("/careers", response=list[CareerOut])
 def list_careers(request, institution_id: int = None, search: str = None):
     return selectors.careers(institution_id=institution_id, search=search)
 
 
-# --------------------------------------------------------------------------
+
 # Institucion
-# --------------------------------------------------------------------------
+
 
 @institution_router.get("/careers", response=list[CareerOut])
 def list_my_careers(request):
@@ -86,9 +125,8 @@ def list_institution_courses(request):
     return selectors.courses_of_institution(institution)
 
 
-# --------------------------------------------------------------------------
+
 # Docente
-# --------------------------------------------------------------------------
 
 @teacher_router.get("/courses", response=list[CourseOut])
 def list_my_courses(request):
@@ -130,6 +168,85 @@ def remove_enrollment(request, course_id: int, enrollment_id: int):
     enrollment = selectors.enrollment(course, enrollment_id)
     try:
         services.remove_enrollment(enrollment)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
+
+
+
+# Alumnos (docente)
+
+
+@teacher_students_router.patch("/students/{student_id}", response=StudentOut)
+def teacher_update_student(request, student_id: int, payload: StudentUpdateIn):
+    """Edita nombre, apellido y email de un alumno de sus cursadas."""
+    student = selectors.student(student_id)
+    ensure_teacher_can_touch_student(request.auth, student)
+    try:
+        return services.update_student(
+            student, **payload.model_dump(exclude_unset=True)
+        )
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+
+@teacher_students_router.post("/students/{student_id}/links", response=StudentLinkOut)
+def teacher_create_student_link(request, student_id: int, payload: StudentLinkIn):
+    """Crea un link para un alumno de sus cursadas."""
+    student = selectors.student(student_id)
+    ensure_teacher_can_touch_student(request.auth, student)
+    try:
+        return services.create_student_link(student, **payload.model_dump())
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+
+@teacher_students_router.delete("/students/{student_id}/links/{link_id}")
+def teacher_delete_student_link(request, student_id: int, link_id: int):
+    """Borra un link de un alumno de sus cursadas."""
+    student = selectors.student(student_id)
+    ensure_teacher_can_touch_student(request.auth, student)
+    try:
+        services.remove_student_link(student, link_id)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
+
+
+# Alumnos (institucion)
+
+
+@institution_students_router.patch("/students/{student_id}", response=StudentOut)
+def institution_update_student(request, student_id: int, payload: StudentUpdateIn):
+    """Edita nombre, apellido y email de un alumno de su institucion."""
+    student = selectors.student(student_id)
+    ensure_institution_can_touch_student(request.auth, student)
+    try:
+        return services.update_student(
+            student, **payload.model_dump(exclude_unset=True)
+        )
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+
+@institution_students_router.post("/students/{student_id}/links", response=StudentLinkOut)
+def institution_create_student_link(request, student_id: int, payload: StudentLinkIn):
+    """Crea un link para un alumno de su institucion."""
+    student = selectors.student(student_id)
+    ensure_institution_can_touch_student(request.auth, student)
+    try:
+        return services.create_student_link(student, **payload.model_dump())
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+
+@institution_students_router.delete("/students/{student_id}/links/{link_id}")
+def institution_delete_student_link(request, student_id: int, link_id: int):
+    """Borra un link de un alumno de su institucion."""
+    student = selectors.student(student_id)
+    ensure_institution_can_touch_student(request.auth, student)
+    try:
+        services.remove_student_link(student, link_id)
     except ValidationError as exc:
         raise validation_error(exc) from exc
     return {"success": True}
