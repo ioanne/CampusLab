@@ -109,9 +109,7 @@ class Course(models.Model):
         ]
 
     def __str__(self):
-        return (
-            f"{self.career.name} - {self.name} ({self.year} {self.get_term_display()})"
-        )
+        return f"{self.career.name} - {self.name} ({self.year} {self.get_term_display()})"
 
     @property
     def institution(self):
@@ -219,6 +217,7 @@ class CourseStudent(models.Model):
     def __str__(self):
         return f"{self.student.full_name} en {self.course}"
 
+
 class Team(models.Model):
     course = models.ForeignKey("Course", on_delete=models.CASCADE, related_name="teams")
     name = models.CharField(max_length=100)
@@ -232,7 +231,11 @@ class Team(models.Model):
 
 class TeamMember(models.Model):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="members")
-    student = models.ForeignKey("Student", on_delete=models.CASCADE, related_name="team_memberships")
-
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="team_participations")
+    
     class Meta:
         unique_together = ("team", "student")
+
+    @property
+    def student_name(self):
+        return f"{self.student.first_name} {self.student.last_name}"

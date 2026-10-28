@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.academics.models import Career, Course, CourseStudent, Student
+from apps.academics.models import Career, Course, CourseStudent, Student, Team, TeamMember
 
 
 class CourseStudentInline(admin.TabularInline):
@@ -38,3 +38,12 @@ class StudentAdmin(admin.ModelAdmin):
 class CourseStudentAdmin(admin.ModelAdmin):
     list_display = ["student", "course", "created_at"]
     search_fields = ["student__last_name", "student__email", "course__name"]
+
+class TeamMemberInline(admin.TabularInline):
+    model = TeamMember
+    extra = 1
+
+@admin.register(Team)
+class TeamAdmin(admin.ModelAdmin):
+    list_display = ("name", "course")
+    inlines = [TeamMemberInline]
