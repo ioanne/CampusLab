@@ -29,6 +29,11 @@ class ProjectStatus(models.TextChoices):
     REJECTED = "REJECTED", "Rechazado"
 
 
+class ProjectKind(models.TextChoices):
+    CLASS_WORK = "CLASS_WORK", "Trabajo de clase"
+    FINAL_PROJECT = "FINAL_PROJECT", "Trabajo de fin de curso"
+
+
 class AssetType(models.TextChoices):
     """Que clase de archivo se subio.
 
@@ -110,6 +115,11 @@ class Project(models.Model):
         blank=True,
         verbose_name="repositorio",
         help_text="El repositorio de GitHub del trabajo.",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=ProjectKind.choices,
+        default=ProjectKind.CLASS_WORK,
     )
     status = models.CharField(
         max_length=10,

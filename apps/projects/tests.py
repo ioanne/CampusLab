@@ -27,7 +27,13 @@ from apps.institutions.models import (
     MembershipStatus,
 )
 from apps.projects import selectors, services
-from apps.projects.models import AssetType, LinkType, Project, ProjectStatus
+from apps.projects.models import (
+    AssetType,
+    LinkType,
+    Project,
+    ProjectKind,
+    ProjectStatus,
+)
 from apps.projects.schemas import ProjectFilters
 
 TEST_MEDIA_ROOT = Path(tempfile.mkdtemp(prefix="banco-proyectos-media-"))
@@ -770,3 +776,25 @@ class PublicCatalogTests(ProjectScenario):
         self.assertEqual(
             [p.title for p in selectors.public_catalog(filtros)], ["Museo Virtual"]
         )
+
+
+class ProjectKindTests(ProjectScenario):
+    """Trabajo de clase o trabajo de fin de curso."""
+
+    def _patch_project(self, project, changes):
+        return self.client.patch(
+            f"/api/teacher/projects/{project.id}",
+            data=json.dumps(changes),
+            content_type="application/json",
+            headers=self._headers("diana@docentes.edu.ar"),
+        )
+
+    def test_a_project_is_class_work_by_default(self):
+        body = self._post_project().json()
+        self.assertEqual(body["kind"], ProjectKind.CLASS_WORK)
+        self.assertEqual(body["kind_label"], "Trabajo de clase")
+
+    def test_a_teacher_uploads_a_final_project(self):
+        body = self._post_project(kind=ProjectKind.FINAL_PROJECT).json()
+        self.assertEqual(body["kind"], ProjectKind.FINAL_PROJECT)
+        self.assertEqual(body["kind_label"], "Trabajo de fin de curso")

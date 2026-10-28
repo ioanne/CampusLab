@@ -21,6 +21,7 @@ from apps.projects.models import (
     LinkType,
     Project,
     ProjectAsset,
+    ProjectKind,
     ProjectLink,
     ProjectStatus,
     ProjectStudent,
@@ -98,6 +99,11 @@ def _initial_status(course):
     return ProjectStatus.APPROVED if trusted else ProjectStatus.PENDING
 
 
+def _validate_kind(kind):
+    if kind not in ProjectKind.values:
+        raise ValidationError({"kind": "El tipo de proyecto no es valido."})
+
+
 @transaction.atomic
 def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **data):
     """Carga un proyecto de una cursada: todo junto o nada.
@@ -118,6 +124,7 @@ def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **d
     aprobado y con la revision firmada por quien lo cargo: la institucion es la
     que revisa, y no tiene sentido que se apruebe a si misma.
     """
+    _validate_kind(data.get("kind", ProjectKind.CLASS_WORK))
     course = academics_selectors.course(course_id)
     students = _students_of_course(course, student_ids)
 
@@ -151,6 +158,8 @@ def update_project(project, *, changes):
     """
     technology_ids = changes.pop("technology_ids", None)
     student_ids = changes.pop("student_ids", None)
+    if "kind" in changes:
+        _validate_kind(changes["kind"])
 
     for field, value in changes.items():
         setattr(project, field, value)
