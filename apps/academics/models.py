@@ -1,5 +1,7 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError #nuevo import de libreria estandar de python
 from django.db import models
+from urllib.parse import urlparse #el urlparse!! 
 
 from apps.academics.managers import (
     CareerQuerySet,
@@ -166,6 +168,7 @@ class Student(models.Model):
             # seria rechazado por repetido. La condicion deja afuera de la regla
             # a las filas con el email vacio, que son justamente las que no se
             # pueden comparar entre si.
+            #email por institucioin ya está implementado
             models.UniqueConstraint(
                 fields=["institution", "email"],
                 condition=~models.Q(email=""),
@@ -195,7 +198,7 @@ class CourseStudent(models.Model):
         on_delete=models.CASCADE,
         related_name="enrollments",
     )
-    student = models.ForeignKey(
+    student = models.ForeignKey(    
         Student,
         on_delete=models.CASCADE,
         related_name="enrollments",
@@ -218,3 +221,73 @@ class CourseStudent(models.Model):
 
     def __str__(self):
         return f"{self.student.full_name} en {self.course}"
+
+class StudentLinkType(models.TextChoices):
+    #los tipos de links que puede llegar a tener un alumno (ver enunciado HU-12)
+    """Son 4: lo que se pide siempre el Linkedin y gitHub; PORTFOLIO es para su pagina personal/portfolio, y OTHER para
+    cualquier otra cosa (un blog, etc,etc)"""
+
+    LINKEDIN = "LINKEDIN", "LinkedIn"
+    GITHUB = "GITHUB", "Github"
+    PORTFOLIO = "PORTFOLIO", "Portfolio"
+    OTHER = "OTHER", "Otro"
+
+class StudentLink(models.Model):
+    #Un link asociado a un alumno: LinkedIn, GitHub, portfolio, etc.
+    """La URL es unica por alumno para no cargar el link dos veces.
+    Si el tipo es LINKEDIN, la URL tiene que ser linkedin.com. Si es GITHUB, tiene que ser github.com. 
+    Para PORTFOLIO Y OTHER, cualquier URL válida sirve.""" 
+    student= models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        related_name="links",
+        verbose_name="alumno",
+    )    
+    link_type = models.CharField(
+        max_length=12,
+        choices=StudentLinkType.choices,
+        verbose_name="tipo de link",
+    )
+
+    title = models.CharField(
+        max_length=120,
+        blank=True,
+        verbose_name="titulo",
+    )
+    url = models.URLField(verbose_name="direccion")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "link del alumno"
+        verbose_name_plural = "links del alumno"
+        ordering = ["link_type", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "url"],
+                name="link_unico_por_alumno",
+            )
+        ]
+
+    def __str__(self):
+        return self.title or self.url
+
+    def clean(self):
+        super().clean()
+
+        if not self.url:
+            return
+
+        parsed = urlparse(self.url)
+        hostname = parsed.hostname or ""
+
+        if self.link_type == StudentLinkType.LINKEDIN:
+            if not (hostname == "linkedin.com" or hostname.endswith(".linkedin.com")):
+                raise ValidationError({
+                    "url": "Si el tipo es LinkedIn, la URL debe ser de linkedin.com."
+                })
+
+        if self.link_type == StudentLinkType.GITHUB:
+            if not (hostname == "github.com" or hostname.endswith(".github.com")):
+                raise ValidationError({
+                    "url": "Si el tipo es GitHub, la URL debe ser de github.com."
+                })    
