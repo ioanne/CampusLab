@@ -9,6 +9,7 @@ from apps.academics.managers import (
 )
 
 
+
 class Career(models.Model):
     """Carrera de una institucion.
 
@@ -47,6 +48,29 @@ class Career(models.Model):
         return f"{self.name} ({self.institution.name})"
 
 
+class Subject(models.Model):
+    career = models.ForeignKey(
+        Career,
+        on_delete=models.CASCADE,
+        related_name="subjects",
+    )
+    name = models.CharField(max_length=150, verbose_name="nombre de la materia")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "materia"
+        verbose_name_plural = "materias"
+        ordering = ["career", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["career", "name"],
+                name="materia_unica_por_carrera",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.career.name})"
+
 class CourseTerm(models.TextChoices):
     """Cuando se dicta la cursada dentro del ano."""
 
@@ -76,6 +100,12 @@ class Course(models.Model):
         Career,
         on_delete=models.CASCADE,
         related_name="courses",
+    )
+    subject = models.ForeignKey(
+        "Subject",
+        on_delete=models.PROTECT,
+        related_name="courses",
+        verbose_name="materia",
     )
     teacher = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -239,3 +269,4 @@ class TeamMember(models.Model):
     @property
     def student_name(self):
         return f"{self.student.first_name} {self.student.last_name}"
+

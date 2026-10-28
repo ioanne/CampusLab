@@ -6,6 +6,11 @@ from apps.academics import selectors, services
 from apps.academics.schemas import (
     CareerIn,
     CareerOut,
+    SubjectIn,
+    SubjectOut,
+    SubjectFilterOut,
+    TeacherFilterOut,
+    CourseFilterOut,
     CourseIn,
     CourseOut,
     EnrollmentOut,
@@ -65,6 +70,28 @@ def ensure_course_of_institution(user, course):
 def list_careers(request, institution_id: int = None, search: str = None):
     return selectors.careers(institution_id=institution_id, search=search)
 
+@public_router.get("/subjects", response=list[SubjectFilterOut])
+def list_filter_subjects(request, career_id: int = None, institution_id: int = None):
+    """Lista materias que tienen proyectos aprobados."""
+    return selectors.subjects_for_catalog(career_id=career_id, institution_id=institution_id)
+
+@public_router.get("/teachers", response=list[TeacherFilterOut])
+def list_filter_teachers(request, institution_id: int = None):
+    """Lista docentes con proyectos aprobados (sin exponer el email)."""
+    return selectors.teachers_for_catalog(institution_id=institution_id)
+
+
+@public_router.get("/courses", response=list[CourseFilterOut])
+def list_filter_courses(request, institution_id: int = None, subject_id: int = None, year: int = None):
+    """Lista cursadas que tienen proyectos aprobados."""
+    return selectors.courses_for_catalog(institution_id=institution_id, subject_id=subject_id, year=year)
+
+
+@public_router.get("/years", response=list[int])
+def list_filter_years(request):
+    """Lista los años de los proyectos aprobados de mayor a menor."""
+    return selectors.years_for_catalog()
+
 
 # --------------------------------------------------------------------------
 # Institucion
@@ -81,6 +108,29 @@ def create_career(request, payload: CareerIn):
     institution = current_institution(request.auth)
     try:
         return services.create_career(institution, **payload.model_dump())
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+@institution_router.get("/careers/{career_id}/subjects", response=list[SubjectOut])
+def list_career_subjects(request, career_id: int):
+    """Lista las materias de una carrera de la institución."""
+    career = selectors.career(career_id)
+    institution = current_institution(request.auth)
+    if career.institution_id != institution.id and request.auth.role != UserRole.ADMIN:
+        raise HttpError(403, "La carrera pertenece a otra institución.")
+    return career.subjects.all()
+
+
+@institution_router.post("/careers/{career_id}/subjects", response=SubjectOut)
+def create_career_subject(request, career_id: int, payload: SubjectIn):
+    """Crea una materia en una carrera de la institución."""
+    career = selectors.career(career_id)
+    institution = current_institution(request.auth)
+    if career.institution_id != institution.id and request.auth.role != UserRole.ADMIN:
+        raise HttpError(403, "La carrera pertenece a otra institución.")
+    
+    try:
+        return services.create_subject(career_id=career.id, name=payload.name)
     except ValidationError as exc:
         raise validation_error(exc) from exc
 

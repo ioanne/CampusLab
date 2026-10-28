@@ -1,5 +1,5 @@
 from datetime import datetime
-
+from datetime import datetime
 from ninja import Schema
 
 
@@ -18,6 +18,16 @@ class CareerOut(Schema):
         return obj.institution.name
 
 
+# --- Esquemas de Materias (Subjects) ---
+class SubjectIn(Schema):
+    name: str
+
+class SubjectOut(Schema):
+    id: int
+    name: str
+    career_id: int
+    created_at: datetime
+
 class CourseIn(Schema):
     """Lo que manda el docente para abrir una cursada.
 
@@ -26,6 +36,7 @@ class CourseIn(Schema):
     """
 
     career_id: int
+    subject_id: int
     name: str
     year: int
     term: str
@@ -33,6 +44,7 @@ class CourseIn(Schema):
 
 class CourseOut(Schema):
     id: int
+    subject: SubjectOut
     name: str
     year: int
     term: str
@@ -94,3 +106,28 @@ class TeamOut(Schema):
     id: int
     name: str
     members: list[TeamMemberOut] = []
+
+class SubjectFilterOut(Schema):
+    id: int
+    name: str
+    career_id: int
+
+
+class TeacherFilterOut(Schema):
+    """Docente para el filtro del catálogo: solo id y nombre completo, sin email."""
+    id: int
+    full_name: str
+
+
+class CourseFilterOut(Schema):
+    id: int
+    name: str
+    year: int
+    term: str
+    term_label: str
+    career_id: int
+    subject_id: int
+
+    @staticmethod
+    def resolve_term_label(obj):
+        return obj.get_term_display()

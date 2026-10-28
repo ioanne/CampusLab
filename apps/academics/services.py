@@ -10,7 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.academics import selectors
-from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student, Team, TeamMember
+from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student, Team, TeamMember,Subject
 from apps.accounts.models import UserRole
 from apps.institutions import selectors as institutions_selectors
 
@@ -27,8 +27,28 @@ def create_career(institution, *, name):
         raise ValidationError({"name": "La institucion ya tiene una carrera con ese nombre."})
     return Career.objects.create(institution=institution, name=name)
 
+def create_subject(career_id: int, name: str) -> Subject:
+    """Crea una materia validando que no exista otra con el mismo nombre en la misma carrera (case-insensitive)."""
+    career = Career.objects.get(pk=career_id)
+    
+    # Validar unicidad sin distinguir mayúsculas/minúsculas
+    if Subject.objects.filter(career=career, name__iexact=name.strip()).exists():
+        raise ValidationError({"name": "Ya existe una materia con este nombre en esta carrera."})
+        
+    return Subject.objects.create(career=career, name=name.strip())
 
-def create_course(teacher, *, career_id, name, year, term):
+def validate_course_subject(career_id: int, subject_id: int):
+    """Valida que la materia pertenezca a la misma carrera de la cursada."""
+    try:
+        subject = Subject.objects.get(pk=subject_id)
+    except Subject.DoesNotExist:
+        raise ValidationError({"subject_id": "La materia especificada no existe."})
+        
+    if subject.career_id != career_id:
+        raise ValidationError({"subject_id": "La materia no pertenece a la carrera de la cursada."})
+    return subject
+
+def create_course(teacher, *, career_id, subject_id, name, year, term):
     """Alta de una cursada, hecha por el docente que la va a dictar.
 
     Aca aparece la regla de permisos del docente: no alcanza con tener el rol
@@ -51,19 +71,22 @@ def create_course(teacher, *, career_id, name, year, term):
             {"career_id": "El docente no forma parte de la institucion de esa carrera."}
         )
 
+    subject = validate_course_subject(career.id, subject_id)
+    
     if term not in CourseTerm.values:
         raise ValidationError(
             {"term": f"Periodo invalido. Opciones: {', '.join(CourseTerm.values)}."}
         )
 
     name = name.strip()
-    if Course.objects.filter(career=career, year=year, term=term, name=name).exists():
+    if Course.objects.filter(career=career, subject=subject, year=year, term=term, name=name).exists():
         raise ValidationError(
             {"name": "Ya existe esa comision en esa carrera, ano y periodo."}
         )
 
     return Course.objects.create(
         career=career,
+        subject=subject,
         teacher=teacher,
         name=name,
         year=year,

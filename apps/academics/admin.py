@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.academics.models import Career, Course, CourseStudent, Student, Team, TeamMember
+from apps.academics.models import Career,Subject, Course, CourseStudent, Student, Team, TeamMember
 
 
 class CourseStudentInline(admin.TabularInline):
@@ -17,12 +17,19 @@ class CareerAdmin(admin.ModelAdmin):
     search_fields = ["name", "institution__name"]
     list_filter = ["institution"]
 
+@admin.register(Subject)
+class SubjectAdmin(admin.ModelAdmin):
+    """Gestión de materias por carrera en el admin de Django."""
+    list_display = ["name", "career", "created_at"]
+    search_fields = ["name", "career__name"]
+    list_filter = ["career__institution", "career"]
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
-    list_display = ["name", "career", "teacher", "year", "term", "created_at"]
-    search_fields = ["name", "career__name", "teacher__email"]
-    list_filter = ["year", "term", "career__institution"]
+    list_display = ["name","subject","career", "teacher", "year", "term", "created_at"]
+    search_fields = ["name", "subject__name", "career__name", "teacher__email"]
+    list_filter = ["year", "term", "career__institution", "subject"]
+    autocomplete_fields = ["subject", "career"]
     inlines = [CourseStudentInline]
 
 

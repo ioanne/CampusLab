@@ -5,7 +5,7 @@ otros. La API los llama y devuelve lo que sale; nunca escribe un filter propio.
 """
 from django.shortcuts import get_object_or_404
 
-from apps.academics.models import Career, Course, CourseStudent, Student
+from apps.academics.models import Career,Subject, Course, CourseStudent, Student
 
 
 def careers(institution_id=None, search=None):
@@ -74,3 +74,62 @@ def teams_of_course(course):
 def team(course, team_id):
     """Busca un equipo específico asegurando que pertenezca a la cursada."""
     return course.teams.get(id=team_id)
+
+def subjects_for_catalog(career_id=None, institution_id=None):
+    """Materias que tienen al menos un proyecto aprobado, filtrables por carrera o institución."""
+    from apps.projects.models import Project  # Importación local para evitar dependencia circular
+    
+    queryset = Subject.objects.filter(
+        courses__projects__status__iexact="approved"  # <-- Acá estaba usando Project.Status
+    ).distinct()
+
+    if career_id:
+        queryset = queryset.filter(career_id=career_id)
+    if institution_id:
+        queryset = queryset.filter(career__institution_id=institution_id)
+    return queryset
+
+
+def teachers_for_catalog(institution_id=None):
+    """Docentes con al menos un proyecto aprobado en la institución."""
+    from apps.projects.models import Project
+    from apps.accounts.models import User
+
+    queryset = User.objects.filter(
+        courses__projects__status__iexact="approved"
+    ).distinct()
+
+    if institution_id:
+        queryset = queryset.filter(
+            courses__career__institution_id=institution_id
+        ).distinct()
+    return queryset
+
+
+def courses_for_catalog(institution_id=None, subject_id=None, year=None):
+    """Cursadas que tienen al menos un proyecto aprobado."""
+    from apps.projects.models import Project
+
+    queryset = Course.objects.filter(
+        projects__status__iexact="approved"
+    ).distinct().with_related()
+
+    if institution_id:
+        queryset = queryset.filter(career__institution_id=institution_id)
+    if subject_id:
+        queryset = queryset.filter(subject_id=subject_id)
+    if year:
+        queryset = queryset.filter(year=year)
+    return queryset
+
+
+def years_for_catalog():
+    """Años de las cursadas que tienen proyectos aprobados, ordenados de mayor a menor."""
+    from apps.projects.models import Project
+
+    return (
+        Course.objects.filter(projects__status__iexact="approved")
+        .values_list("year", flat=True)
+        .distinct()
+        .order_by("-year")
+    )
