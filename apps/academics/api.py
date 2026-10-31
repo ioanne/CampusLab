@@ -17,7 +17,6 @@ from apps.academics.schemas import (
     SubjectIn,
     SubjectOut,
 )
-from apps.academics.models import CourseStudent  # NUEVO: para validar inscripciones
 from apps.accounts.models import UserRole
 from apps.accounts.permissions import institution_or_admin, teacher_or_admin
 from apps.institutions.api import current_institution
@@ -80,8 +79,6 @@ def ensure_career_of_institution(user, career):
         raise HttpError(403, "La carrera pertenece a otra institucion.")
 
 
-# NUEVAS funciones de permiso para alumnos
-
 def ensure_teacher_can_touch_student(user, student):
     """Un docente puede tocar a un alumno SOLO si esta inscripto en alguna de sus cursadas.
 
@@ -90,10 +87,7 @@ def ensure_teacher_can_touch_student(user, student):
     """
     if user.role == UserRole.ADMIN:
         return
-    tiene_inscripcion = CourseStudent.objects.filter(
-        student=student, course__teacher=user
-    ).exists()
-    if not tiene_inscripcion:
+    if not selectors.teacher_has_student(user, student):
         raise HttpError(403, "El alumno no esta inscripto en ninguna de tus cursadas.")
 
 
@@ -268,10 +262,7 @@ def teacher_delete_student_link(request, student_id: int, link_id: int):
     """Borra un link de un alumno de sus cursadas."""
     student = selectors.student(student_id)
     ensure_teacher_can_touch_student(request.auth, student)
-    try:
-        services.remove_student_link(student, link_id)
-    except ValidationError as exc:
-        raise validation_error(exc) from exc
+    services.remove_student_link(selectors.student_link(student, link_id))
     return {"success": True}
 
 
@@ -307,8 +298,5 @@ def institution_delete_student_link(request, student_id: int, link_id: int):
     """Borra un link de un alumno de su institucion."""
     student = selectors.student(student_id)
     ensure_institution_can_touch_student(request.auth, student)
-    try:
-        services.remove_student_link(student, link_id)
-    except ValidationError as exc:
-        raise validation_error(exc) from exc
+    services.remove_student_link(selectors.student_link(student, link_id))
     return {"success": True}

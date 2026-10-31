@@ -5,7 +5,14 @@ otros. La API los llama y devuelve lo que sale; nunca escribe un filter propio.
 """
 from django.shortcuts import get_object_or_404
 
-from apps.academics.models import Career, Course, CourseStudent, Student, Subject
+from apps.academics.models import (
+    Career,
+    Course,
+    CourseStudent,
+    Student,
+    StudentLink,
+    Subject,
+)
 
 
 def careers(institution_id=None, search=None):
@@ -47,7 +54,7 @@ def course(course_id):
 
 def enrollments_of_course(course):
     """Los alumnos inscriptos en una cursada, con el alumno ya cargado."""
-    return CourseStudent.objects.of_course(course).with_student()
+    return CourseStudent.objects.of_course(course).with_student_links()
 
 
 def enrollment(course, enrollment_id):
@@ -76,9 +83,10 @@ def students_enrolled_in_course(course, student_ids):
         enrollments__course=course, id__in=student_ids
     ).distinct()
 
+
 def student(student_id):
-    """Busca un alumno por id, con sus links precargados. 
-    
+    """Busca un alumno por id, con sus links precargados.
+
     El prefetch_related evita el problema N+1: en lugar de hacer 1 consulta
     para el alumno y N para sus links, hace 2 en total.
     """
@@ -87,3 +95,10 @@ def student(student_id):
         pk=student_id,
     )
 
+
+def student_link(student, link_id):
+    return get_object_or_404(StudentLink.objects.filter(student=student), pk=link_id)
+
+
+def teacher_has_student(teacher, student):
+    return CourseStudent.objects.filter(student=student, course__teacher=teacher).exists()

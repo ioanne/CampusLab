@@ -116,13 +116,13 @@ def update_student(student, *, first_name=None, last_name=None, email=None):
         student.last_name = last_name.strip()
     if email is not None:
         email = email.strip().lower()
-        otro = (
-            Student.objects.of_institution(student.institution)
+        if (
+            email
+            and Student.objects.of_institution(student.institution)
             .with_email(email)
             .exclude(pk=student.pk)
-            .first()
-        )
-        if otro is not None:
+            .exists()
+        ):
             raise ValidationError(
                 {"email": "Ya hay otro alumno en esta institucion con ese email."}
             )
@@ -144,29 +144,22 @@ def create_student_link(student, *, link_type, title="", url):
     Tambien valida el UniqueConstraint (student, url): no se puede cargar el
     mismo link dos veces para el mismo alumno.
     """
+    url = url.strip()
+    if student.links.filter(url=url).exists():
+        raise ValidationError({"url": "Ese link ya esta cargado para el alumno."})
+
     link = StudentLink(
         student=student,
         link_type=link_type,
         title=title.strip(),
-        url=url.strip(),
+        url=url,
     )
     link.full_clean()
     link.save()
     return link
 
 
-def remove_student_link(student, link_id):
-    """Borra un link del alumno.
-
-    Busca el link por id Y por alumno: si el link es de otro alumno, no lo
-    encuentra y devuelve un error. Asi nadie puede borrar links ajenos pasando
-    un id que no le corresponde.
-    """
-    link = StudentLink.objects.filter(pk=link_id, student=student).first()
-    if link is None:
-        raise ValidationError(
-            {"link_id": "El link no existe o no pertenece a este alumno."}
-        )
+def remove_student_link(link):
     link.delete()
 
 
@@ -201,9 +194,12 @@ def enroll_student(course, *, first_name, last_name, email="", links=None):
     if CourseStudent.objects.of_course(course).filter(student=student).exists():
         raise ValidationError({"student": "El alumno ya esta inscripto en esta cursada."})
 
-    # NUEVO: crear los links si vinieron en el pedido
-    for link_data in (links or []):
-        create_student_link(student, **link_data)
+    existing_urls = set(student.links.values_list("url", flat=True))
+    for link_data in links or []:
+        if link_data["url"].strip() in existing_urls:
+            continue
+        link = create_student_link(student, **link_data)
+        existing_urls.add(link.url)
 
     return CourseStudent.objects.create(course=course, student=student)
 

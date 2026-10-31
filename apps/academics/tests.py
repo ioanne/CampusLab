@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 
 from apps.academics import selectors
 from apps.academics.models import (
@@ -824,8 +825,7 @@ class StudentLinkApiTests(AcademicsTestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_delete_link_of_another_student_returns_400(self):
-        """El service verifica que el link sea del alumno, no solo que exista."""
+    def test_delete_link_of_another_student_returns_404(self):
         otro_alumno = Student.objects.create(
             institution=self.institution,
             first_name="Bruno",
@@ -843,8 +843,181 @@ class StudentLinkApiTests(AcademicsTestCase):
             self.teacher_access,
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 404)
         self.assertTrue(StudentLink.objects.filter(pk=link_ajeno.id).exists())
+
+    def test_teacher_deletes_a_link_of_his_student(self):
+        link = StudentLink.objects.create(
+            student=self.ana, link_type="GITHUB", url="https://github.com/ana-gomez"
+        )
+
+        response = self._delete(
+            f"/api/teacher/students/{self.ana.id}/links/{link.id}",
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(StudentLink.objects.filter(pk=link.id).exists())
+
+    def test_institution_deletes_a_link_of_its_student(self):
+        link = StudentLink.objects.create(
+            student=self.ana, link_type="GITHUB", url="https://github.com/ana-gomez"
+        )
+
+        response = self._delete(
+            f"/api/institution/students/{self.ana.id}/links/{link.id}",
+            self.institution_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(StudentLink.objects.filter(pk=link.id).exists())
+
+    def test_teacher_cannot_delete_a_link_of_a_student_he_does_not_have(self):
+        link = StudentLink.objects.create(
+            student=self.ana, link_type="GITHUB", url="https://github.com/ana-gomez"
+        )
+        self._create_other_teacher()
+        other_access = self._login("otro@docentes.edu.ar", "Docente12345!")
+
+        response = self._delete(
+            f"/api/teacher/students/{self.ana.id}/links/{link.id}", other_access
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(StudentLink.objects.filter(pk=link.id).exists())
+
+    def test_delete_a_link_that_does_not_exist_returns_404(self):
+        response = self._delete(
+            f"/api/teacher/students/{self.ana.id}/links/9999", self.teacher_access
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_duplicate_link_error_points_to_the_url(self):
+        url = f"/api/teacher/students/{self.ana.id}/links"
+        payload = {"link_type": "GITHUB", "url": "https://github.com/ana-gomez"}
+        self._post(url, payload, self.teacher_access)
+
+        response = self._post(url, payload, self.teacher_access)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("url", json.dumps(response.json()))
+        self.assertIn("ya esta cargado", json.dumps(response.json()))
+
+    def test_a_link_has_to_be_http_or_https(self):
+        response = self._post(
+            f"/api/teacher/students/{self.ana.id}/links",
+            {"link_type": "LINKEDIN", "url": "ftp://linkedin.com/in/ana-gomez"},
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(StudentLink.objects.exists())
+
+    def test_email_can_be_cleared_when_another_student_has_none(self):
+        Student.objects.create(
+            institution=self.institution, first_name="Bruno", last_name="Diaz"
+        )
+
+        response = self._patch(
+            f"/api/teacher/students/{self.ana.id}",
+            {"email": ""},
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.ana.refresh_from_db()
+        self.assertEqual(self.ana.email, "")
+
+    def test_reenrolling_a_known_student_with_the_same_links_works(self):
+        StudentLink.objects.create(
+            student=self.ana,
+            link_type="LINKEDIN",
+            url="https://linkedin.com/in/ana-gomez",
+        )
+        other_course = self._create_course(name="2C - Manana")
+
+        response = self._post(
+            f"/api/teacher/courses/{other_course.id}/students",
+            {
+                "first_name": "Ana",
+                "last_name": "Gomez",
+                "email": "ana@alumnos.edu.ar",
+                "links": [
+                    {"link_type": "LINKEDIN", "url": "https://linkedin.com/in/ana-gomez"},
+                    {"link_type": "GITHUB", "url": "https://github.com/ana-gomez"},
+                ],
+            },
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            CourseStudent.objects.filter(course=other_course, student=self.ana).exists()
+        )
+        self.assertEqual(
+            sorted(self.ana.links.values_list("url", flat=True)),
+            ["https://github.com/ana-gomez", "https://linkedin.com/in/ana-gomez"],
+        )
+
+    def test_the_same_link_twice_in_one_enrollment_is_saved_once(self):
+        link = {"link_type": "GITHUB", "url": "https://github.com/carla-ruiz"}
+
+        response = self._post(
+            f"/api/teacher/courses/{self.course.id}/students",
+            {
+                "first_name": "Carla",
+                "last_name": "Ruiz",
+                "email": "carla@alumnos.edu.ar",
+                "links": [link, link],
+            },
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            Student.objects.get(email="carla@alumnos.edu.ar").links.count(), 1
+        )
+
+    def test_an_invalid_link_cancels_the_whole_enrollment(self):
+        response = self._post(
+            f"/api/teacher/courses/{self.course.id}/students",
+            {
+                "first_name": "Carla",
+                "last_name": "Ruiz",
+                "email": "carla@alumnos.edu.ar",
+                "links": [{"link_type": "LINKEDIN", "url": "https://github.com/carla"}],
+            },
+            self.teacher_access,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Student.objects.filter(email="carla@alumnos.edu.ar").exists())
+
+    def test_listing_the_students_does_not_query_links_one_by_one(self):
+        url = f"/api/teacher/courses/{self.course.id}/students"
+
+        def count_queries():
+            with CaptureQueriesContext(connection) as context:
+                response = self.client.get(
+                    url, HTTP_AUTHORIZATION=f"Bearer {self.teacher_access}"
+                )
+            self.assertEqual(response.status_code, 200)
+            return len(context.captured_queries)
+
+        with_one_student = count_queries()
+        for number in range(3):
+            student = Student.objects.create(
+                institution=self.institution,
+                first_name=f"Alumno {number}",
+                last_name="Extra",
+            )
+            StudentLink.objects.create(
+                student=student, link_type="OTHER", url=f"https://blog.com/{number}"
+            )
+            CourseStudent.objects.create(course=self.course, student=student)
+
+        self.assertEqual(count_queries(), with_one_student)
 
 
 class UnassignedSubjectMigrationTests(TransactionTestCase):

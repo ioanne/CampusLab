@@ -71,3 +71,6 @@ class CourseStudentQuerySet(models.QuerySet):
 
     def with_student(self):
         return self.select_related("student")
+
+    def with_student_links(self):
+        return self.with_student().prefetch_related("student__links")
