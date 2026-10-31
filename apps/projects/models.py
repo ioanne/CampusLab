@@ -200,15 +200,18 @@ class Project(models.Model):
         super().clean()
         if self.repository_url:
             parsed = urlparse(self.repository_url)
-
+            hostname = (parsed.hostname or "").removeprefix("www.")
             if (
                 parsed.scheme != "https"
-                or parsed.hostname not in settings.ALLOWED_REPOSITORY_HOSTS
+                or hostname not in settings.ALLOWED_REPOSITORY_HOSTS
             ):
+                allowed_hosts = ", ".join(settings.ALLOWED_REPOSITORY_HOSTS)
                 raise ValidationError(
                     {
-                        "repository_url": "El repositorio tiene que ser un link "
-                        f"https:// de alguno de estos dominios: {', '.join(settings.ALLOWED_REPOSITORY_HOSTS)}."
+                        "repository_url": (
+                            "El repositorio tiene que ser un link https:// de "
+                            f"alguno de estos dominios: {allowed_hosts}."
+                        )
                     }
                 )
 
