@@ -344,6 +344,18 @@ class ProjectUploadTests(ProjectScenario):
         self.assertEqual(response.status_code, 400)
         self.assertTrue(CourseStudent.objects.filter(pk=enrollment.pk).exists())
 
+    def test_the_institution_cannot_remove_a_student_with_a_project(self):
+        self._create_project(students=[self.ana])
+        enrollment = CourseStudent.objects.get(course=self.course, student=self.ana)
+
+        response = self.client.delete(
+            f"/api/institution/courses/{self.course.id}/students/{enrollment.id}",
+            headers=self._headers("rectoria@ifts18.edu.ar", "Rectoria12345!"),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(CourseStudent.objects.filter(pk=enrollment.pk).exists())
+
     def test_another_teacher_cannot_upload_into_this_course(self):
         response = self._post_project(email="hugo@docentes.edu.ar")
         self.assertEqual(response.status_code, 403)

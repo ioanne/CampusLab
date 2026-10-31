@@ -483,6 +483,136 @@ class EnrollmentApiTests(AcademicsTestCase):
         self.assertEqual(list(found), [enrolled])
 
 
+class InstitutionEnrollmentApiTests(AcademicsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.course = self._create_course()
+        self.access = self._login("rectoria@ifts18.edu.ar", "Rectoria12345!")
+
+        other_institution = Institution.objects.create(name="IFTS 11", city="CABA")
+        other_career = Career.objects.create(
+            institution=other_institution, name="Analisis de Sistemas"
+        )
+        other_teacher = self.user_model.objects.create_user(
+            email="otro@docentes.edu.ar",
+            password="Docente12345!",
+            first_name="Omar",
+            last_name="Otro",
+            role=UserRole.TEACHER,
+        )
+        self.foreign_course = Course.objects.create(
+            career=other_career,
+            subject=Subject.objects.create(career=other_career, name="Base de Datos"),
+            teacher=other_teacher,
+            name="1C - Manana",
+            year=2026,
+            term=CourseTerm.FIRST,
+        )
+
+    def _url(self, course):
+        return f"/api/institution/courses/{course.id}/students"
+
+    def _enroll(self, course, first_name="Ana", last_name="Gomez", email=""):
+        return self._post(
+            self._url(course),
+            {"first_name": first_name, "last_name": last_name, "email": email},
+            self.access,
+        )
+
+    def _get(self, course):
+        return self.client.get(
+            self._url(course), HTTP_AUTHORIZATION=f"Bearer {self.access}"
+        )
+
+    def _delete(self, course, enrollment):
+        return self.client.delete(
+            f"{self._url(course)}/{enrollment.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access}",
+        )
+
+    def test_institution_enrolls_a_student_in_its_course(self):
+        response = self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["student"]["full_name"], "Ana Gomez")
+        student = Student.objects.get(email="ana@alumnos.edu.ar")
+        self.assertEqual(student.institution, self.institution)
+        self.assertTrue(
+            CourseStudent.objects.filter(course=self.course, student=student).exists()
+        )
+
+    def test_institution_cannot_enroll_in_a_course_of_another_institution(self):
+        response = self._enroll(self.foreign_course, email="ana@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(CourseStudent.objects.exists())
+
+    def test_the_same_email_reuses_the_student_of_the_institution(self):
+        other_course = self._create_course(name="2C - Manana")
+
+        self._enroll(self.course, email="ana@alumnos.edu.ar")
+        response = self._enroll(other_course, email="ANA@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Student.objects.count(), 1)
+        self.assertEqual(CourseStudent.objects.count(), 2)
+
+    def test_student_cannot_be_enrolled_twice_in_the_same_course(self):
+        self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        response = self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(CourseStudent.objects.filter(course=self.course).count(), 1)
+
+    def test_institution_lists_the_students_of_its_course(self):
+        self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        response = self._get(self.course)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [e["student"]["email"] for e in response.json()], ["ana@alumnos.edu.ar"]
+        )
+
+    def test_institution_cannot_list_the_students_of_another_institution(self):
+        response = self._get(self.foreign_course)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_institution_removes_an_enrollment_and_keeps_the_student(self):
+        self._enroll(self.course, email="ana@alumnos.edu.ar")
+        enrollment = CourseStudent.objects.get(course=self.course)
+
+        response = self._delete(self.course, enrollment)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(CourseStudent.objects.filter(pk=enrollment.pk).exists())
+        self.assertTrue(Student.objects.filter(email="ana@alumnos.edu.ar").exists())
+
+    def test_institution_cannot_remove_an_enrollment_of_another_institution(self):
+        student = Student.objects.create(
+            institution=self.foreign_course.institution,
+            first_name="Luis",
+            last_name="Perez",
+        )
+        enrollment = CourseStudent.objects.create(
+            course=self.foreign_course, student=student
+        )
+
+        response = self._delete(self.foreign_course, enrollment)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(CourseStudent.objects.filter(pk=enrollment.pk).exists())
+
+    def test_teacher_cannot_use_the_institution_endpoints(self):
+        self.access = self._login("diana@docentes.edu.ar", "Docente12345!")
+
+        response = self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 403)
+
+
 class UnassignedSubjectMigrationTests(TransactionTestCase):
     """La migracion en dos pasos, sobre una base que ya tenia cursadas.
 
