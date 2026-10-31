@@ -295,10 +295,69 @@ class ProjectUploadTests(ProjectScenario):
         self.assertEqual(body["repository_url"], "")
         self.assertEqual(body["technologies"], [])
 
-    def test_the_repository_has_to_be_github(self):
-        response = self._post_project(repository_url="https://gitlab.com/ifts/museo")
+    def test_the_repository_has_to_be_github_gitlab_or_bitbucket(self):
+        for url in (
+            "https://github.com/ifts/museo",
+            "https://gitlab.com/ifts/museo",
+            "https://bitbucket.org/ifts/museo",
+            "https://www.github.com/ifts/museo",
+            "https://www.gitlab.com/ifts/museo",
+            "https://www.bitbucket.org/ifts/museo",
+            "https://GitHub.com/ifts/museo",
+        ):
+            with self.subTest(url=url):
+                response = self._post_project(repository_url=url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["repository_url"], url)
+
+    def test_the_repository_has_to_be_an_allowed_host(self):
+        response = self._post_project(repository_url="https://codeberg.org/ifts/museo")
+        self.assertEqual(response.status_code, 400)
+        body = json.dumps(response.json())
+        self.assertIn("repository_url", body)
+        for host in ("github.com", "gitlab.com", "bitbucket.org"):
+            self.assertIn(host, body)
+
+    def test_the_repository_has_to_be_https(self):
+        response = self._post_project(repository_url="http://github.com/ifts/museo")
         self.assertEqual(response.status_code, 400)
         self.assertIn("repository_url", json.dumps(response.json()))
+
+    def test_a_host_that_only_looks_like_an_allowed_one_is_rejected(self):
+        for url in (
+            "https://github.com.evil.com/ifts/museo",
+            "https://notgithub.com/ifts/museo",
+            "https://gitlab.com@evil.com/ifts/museo",
+            "https://pages.github.com/ifts/museo",
+        ):
+            with self.subTest(url=url):
+                response = self._post_project(repository_url=url)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("repository_url", json.dumps(response.json()))
+
+    @override_settings(ALLOWED_REPOSITORY_HOSTS=["codeberg.org"])
+    def test_the_allowed_hosts_come_from_settings(self):
+        accepted = self._post_project(repository_url="https://codeberg.org/ifts/museo")
+        rejected = self._post_project(repository_url="https://github.com/ifts/museo")
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("codeberg.org", json.dumps(rejected.json()))
+
+    def test_editing_the_repository_is_validated_too(self):
+        project = Project.objects.get(pk=self._post_project().json()["id"])
+
+        response = self.client.patch(
+            f"/api/teacher/projects/{project.id}",
+            data=json.dumps({"repository_url": "https://codeberg.org/ifts/museo"}),
+            content_type="application/json",
+            headers=self._headers("diana@docentes.edu.ar"),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("repository_url", json.dumps(response.json()))
+        project.refresh_from_db()
+        self.assertEqual(project.repository_url, "https://github.com/ifts/museo-virtual")
 
     def test_a_project_needs_at_least_one_student(self):
         response = self._post_project(student_ids=[])
