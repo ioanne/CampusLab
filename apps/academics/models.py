@@ -1,4 +1,7 @@
+from urllib.parse import urlparse
+
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.academics.managers import (
@@ -262,3 +265,78 @@ class CourseStudent(models.Model):
 
     def __str__(self):
         return f"{self.student.full_name} en {self.course}"
+
+
+class StudentLinkType(models.TextChoices):
+    """Son 4: lo que se pide siempre el Linkedin y gitHub; PORTFOLIO es para su pagina personal/portfolio, y OTHER para
+    cualquier otra cosa (un blog, etc,etc)"""
+
+    LINKEDIN = "LINKEDIN", "LinkedIn"
+    GITHUB = "GITHUB", "Github"
+    PORTFOLIO = "PORTFOLIO", "Portfolio"
+    OTHER = "OTHER", "Otro"
+
+
+class StudentLink(models.Model):
+    """La URL es unica por alumno para no cargar el link dos veces.
+    Si el tipo es LINKEDIN, la URL tiene que ser linkedin.com. Si es GITHUB, tiene que ser github.com.
+    Para PORTFOLIO Y OTHER, cualquier URL válida sirve."""
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        related_name="links",
+        verbose_name="alumno",
+    )
+    link_type = models.CharField(
+        max_length=12,
+        choices=StudentLinkType.choices,
+        verbose_name="tipo de link",
+    )
+
+    title = models.CharField(
+        max_length=120,
+        blank=True,
+        verbose_name="titulo",
+    )
+    url = models.URLField(verbose_name="direccion")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "link del alumno"
+        verbose_name_plural = "links del alumno"
+        ordering = ["link_type", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "url"],
+                name="link_unico_por_alumno",
+            )
+        ]
+
+    def __str__(self):
+        return self.title or self.url
+
+    def clean(self):
+        super().clean()
+
+        if not self.url:
+            return
+
+        parsed = urlparse(self.url)
+        hostname = parsed.hostname or ""
+
+        if parsed.scheme not in {"http", "https"}:
+            raise ValidationError(
+                {"url": "La URL tiene que empezar con http:// o https://."}
+            )
+
+        if self.link_type == StudentLinkType.LINKEDIN:
+            if not (hostname == "linkedin.com" or hostname.endswith(".linkedin.com")):
+                raise ValidationError(
+                    {"url": "Si el tipo es LinkedIn, la URL debe ser de linkedin.com."}
+                )
+
+        if self.link_type == StudentLinkType.GITHUB:
+            if not (hostname == "github.com" or hostname.endswith(".github.com")):
+                raise ValidationError(
+                    {"url": "Si el tipo es GitHub, la URL debe ser de github.com."}
+                )

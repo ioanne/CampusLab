@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from apps.academics.models import Career, Course, CourseStudent, Student, Subject
+from apps.academics.models import (
+    Career,
+    Course,
+    CourseStudent,
+    Student,
+    StudentLink,
+    Subject,
+)
 
 
 class CourseStudentInline(admin.TabularInline):
@@ -35,12 +42,25 @@ class CourseAdmin(admin.ModelAdmin):
     inlines = [CourseStudentInline]
 
 
+class StudentLinkInline(admin.TabularInline):
+    model = StudentLink
+    extra = 0
+
+
 @admin.register(Student)
 class StudentAdmin(admin.ModelAdmin):
     list_display = ["last_name", "first_name", "email", "institution", "created_at"]
     # search_fields es lo que hace funcionar el autocomplete del inline.
     search_fields = ["last_name", "first_name", "email"]
     list_filter = ["institution"]
+    inlines = [StudentLinkInline]
+
+
+@admin.register(StudentLink)
+class StudentLinkAdmin(admin.ModelAdmin):
+    list_display = ["student", "link_type", "url", "created_at"]
+    search_fields = ["url", "student__last_name", "student__email"]
+    list_filter = ["link_type"]
 
 
 @admin.register(CourseStudent)
