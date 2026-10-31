@@ -61,9 +61,6 @@ def ensure_course_of_institution(user, course):
     """
     if user.role == UserRole.ADMIN:
         return
-
-   
-    
     institution = current_institution(user)
     if course.career.institution_id != institution.id:
         raise HttpError(403, "La cursada pertenece a otra institucion.")

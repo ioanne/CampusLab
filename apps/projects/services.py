@@ -169,47 +169,6 @@ def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **d
     return project
 
 
-'''
-@transaction.atomic
-def update_project(project, *, changes):
-    """Aplica solo lo que vino y vuelve el proyecto a la cola de revision.
-
-    Editar un proyecto lo devuelve a PENDING: lo que esta publicado tiene que
-    ser siempre una version que la institucion vio. Se limpian quien reviso y
-    cuando, porque esa revision ya no corresponde a este texto. Al docente con
-    privilegio no lo devuelve a la cola, por el mismo motivo por el que no lo
-    hizo al crearlo: su edicion tambien sale publicada.
-
-    La devolucion escrita (review_notes), en cambio, NO se borra: el docente la
-    sigue teniendo a la vista mientras corrige, que es justamente para lo que se
-    la escribieron. Se reemplaza sola en la proxima revision.
-
-    La cursada no esta entre los campos editables. Cambiarla cambiaria de golpe
-    la institucion, la carrera y el docente del proyecto, y dejaria adentro
-    alumnos de otra comision: si un trabajo se cargo en la cursada equivocada,
-    se carga de nuevo donde va.
-    """
-    technology_ids = changes.pop("technology_ids", None)
-    student_ids = changes.pop("student_ids", None)
-    if "kind" in changes:
-        _validate_kind(changes["kind"])
-
-    for field, value in changes.items():
-        setattr(project, field, value)
-
-    project.status = _initial_status(project.course)
-    project.reviewed_by = None
-    project.reviewed_at = None
-    project.save()
-
-    if technology_ids is not None:
-        replace_technologies(project, technology_ids)
-    if student_ids is not None:
-        replace_students(project, _students_of_course(project.course, student_ids))
-    return project
-'''
-
-
 @transaction.atomic
 def update_project(project, *, changes, reviewer=None):
     """
@@ -217,6 +176,8 @@ def update_project(project, *, changes, reviewer=None):
     """
     technology_ids = changes.pop("technology_ids", None)
     student_ids = changes.pop("student_ids", None)
+    if "kind" in changes:
+        _validate_kind(changes["kind"])
 
     for field, value in changes.items():
         setattr(project, field, value)
