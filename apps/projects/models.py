@@ -12,6 +12,7 @@ app necesita saber quien la usa.
 
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -27,6 +28,11 @@ class ProjectStatus(models.TextChoices):
     APPROVED = "APPROVED", "Aprobado"
     CHANGES = "CHANGES", "Con observaciones para corregir"
     REJECTED = "REJECTED", "Rechazado"
+
+
+class ProjectKind(models.TextChoices):
+    CLASS_WORK = "CLASS_WORK", "Trabajo de clase"
+    FINAL_PROJECT = "FINAL_PROJECT", "Trabajo de fin de curso"
 
 
 class AssetType(models.TextChoices):
@@ -55,8 +61,9 @@ def project_asset_upload_to(instance, filename):
     Una carpeta por proyecto y, adentro, una por tipo: asi la carpeta media se
     puede mirar a ojo y se entiende de quien es cada archivo.
     """
-    base_name = Path(filename).name
-    return f"projects/{instance.project.slug}/{instance.asset_type.lower()}/{base_name}"
+    extension = Path(filename).suffix
+    unique_name = f"{uuid4().hex}{extension}"
+    return f"projects/{instance.project.slug}/{instance.asset_type.lower()}/{unique_name}"
 
 
 class Project(models.Model):
@@ -69,14 +76,15 @@ class Project(models.Model):
     equipo de otro es team_name, que es un campo del proyecto y no una tabla
     aparte: el equipo no existe fuera del trabajo que hizo.
 
-    No hay clave foranea a la institucion, a la carrera, al docente ni al ciclo
-    lectivo: TODAS salen de la cursada, y se exponen como properties
-    (institution, career, teacher). No es por escribir menos codigo. Es que el
-    dato existe una sola vez: si el proyecto guardara su propia carrera, nada
-    impediria que apunte a una carrera distinta de la de su cursada, y habria
-    que escribir una validacion para sostener a mano algo que el modelo puede
-    hacer imposible. Los filtros pagan el precio de cruzar la relacion
-    (course__career__institution) y a cambio el dato no puede contradecirse.
+    No hay clave foranea a la institucion, a la carrera, a la materia, al
+    docente ni al ciclo lectivo: TODAS salen de la cursada, y se exponen como
+    properties (institution, career, subject, teacher). No es por escribir menos
+    codigo. Es que el dato existe una sola vez: si el proyecto guardara su
+    propia carrera, nada impediria que apunte a una carrera distinta de la de su
+    cursada, y habria que escribir una validacion para sostener a mano algo que
+    el modelo puede hacer imposible. Los filtros pagan el precio de cruzar la
+    relacion (course__career__institution) y a cambio el dato no puede
+    contradecirse.
 
     Nace pendiente: recien cuando la institucion lo aprueba aparece en el
     catalogo publico.
@@ -109,7 +117,13 @@ class Project(models.Model):
     repository_url = models.URLField(
         blank=True,
         verbose_name="repositorio",
-        help_text="El repositorio de GitHub del trabajo.",
+        help_text="El repositorio del trabajo (GitHub, GitLab o Bitbucket).",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=ProjectKind.choices,
+        default=ProjectKind.CLASS_WORK,
+        verbose_name="tipo",
     )
     status = models.CharField(
         max_length=10,
@@ -152,6 +166,12 @@ class Project(models.Model):
         return self.course.career
 
     @property
+    def subject(self):
+        """La materia tambien es la de la cursada: el proyecto no la guarda,
+        igual que la carrera, la institucion y el docente."""
+        return self.course.subject
+
+    @property
     def institution(self):
         """Dos saltos, cursada y carrera, para llegar a la institucion.
 
@@ -180,9 +200,19 @@ class Project(models.Model):
         super().clean()
         if self.repository_url:
             parsed = urlparse(self.repository_url)
-            if parsed.hostname not in {"github.com", "www.github.com"}:
+            hostname = (parsed.hostname or "").removeprefix("www.")
+            if (
+                parsed.scheme != "https"
+                or hostname not in settings.ALLOWED_REPOSITORY_HOSTS
+            ):
+                allowed_hosts = ", ".join(settings.ALLOWED_REPOSITORY_HOSTS)
                 raise ValidationError(
-                    {"repository_url": "El repositorio debe pertenecer a GitHub."}
+                    {
+                        "repository_url": (
+                            "El repositorio tiene que ser un link https:// de "
+                            f"alguno de estos dominios: {allowed_hosts}."
+                        )
+                    }
                 )
 
     def review(self, status, *, reviewer=None, notes="", save=True):

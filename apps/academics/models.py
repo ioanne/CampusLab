@@ -1,4 +1,7 @@
+from urllib.parse import urlparse
+
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.academics.managers import (
@@ -6,6 +9,7 @@ from apps.academics.managers import (
     CourseQuerySet,
     CourseStudentQuerySet,
     StudentQuerySet,
+    SubjectQuerySet,
 )
 
 
@@ -47,6 +51,43 @@ class Career(models.Model):
         return f"{self.name} ({self.institution.name})"
 
 
+class Subject(models.Model):
+    """Materia de una carrera: lo que se dicta en una cursada.
+
+    Cuelga de la carrera y no de la institucion por la misma razon que la
+    carrera cuelga de la institucion: "Programacion I" de Desarrollo de Software
+    y la de Analisis de Sistemas son materias distintas, cada una de su plan.
+
+    El nombre es unico por carrera. La restriccion de la base compara tal cual;
+    el service compara sin distinguir mayusculas, igual que con las carreras.
+    """
+
+    career = models.ForeignKey(
+        Career,
+        on_delete=models.CASCADE,
+        related_name="subjects",
+        verbose_name="carrera",
+    )
+    name = models.CharField(max_length=180)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = SubjectQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "materia"
+        verbose_name_plural = "materias"
+        ordering = ["career__name", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["career", "name"],
+                name="materia_unica_por_carrera",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.career.name})"
+
+
 class CourseTerm(models.TextChoices):
     """Cuando se dicta la cursada dentro del ano."""
 
@@ -76,6 +117,12 @@ class Course(models.Model):
         Career,
         on_delete=models.CASCADE,
         related_name="courses",
+    )
+    subject = models.ForeignKey(
+        Subject,
+        on_delete=models.PROTECT,
+        related_name="courses",
+        verbose_name="materia",
     )
     teacher = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -218,3 +265,78 @@ class CourseStudent(models.Model):
 
     def __str__(self):
         return f"{self.student.full_name} en {self.course}"
+
+
+class StudentLinkType(models.TextChoices):
+    """Son 4: lo que se pide siempre el Linkedin y gitHub; PORTFOLIO es para su pagina personal/portfolio, y OTHER para
+    cualquier otra cosa (un blog, etc,etc)"""
+
+    LINKEDIN = "LINKEDIN", "LinkedIn"
+    GITHUB = "GITHUB", "Github"
+    PORTFOLIO = "PORTFOLIO", "Portfolio"
+    OTHER = "OTHER", "Otro"
+
+
+class StudentLink(models.Model):
+    """La URL es unica por alumno para no cargar el link dos veces.
+    Si el tipo es LINKEDIN, la URL tiene que ser linkedin.com. Si es GITHUB, tiene que ser github.com.
+    Para PORTFOLIO Y OTHER, cualquier URL válida sirve."""
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        related_name="links",
+        verbose_name="alumno",
+    )
+    link_type = models.CharField(
+        max_length=12,
+        choices=StudentLinkType.choices,
+        verbose_name="tipo de link",
+    )
+
+    title = models.CharField(
+        max_length=120,
+        blank=True,
+        verbose_name="titulo",
+    )
+    url = models.URLField(verbose_name="direccion")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "link del alumno"
+        verbose_name_plural = "links del alumno"
+        ordering = ["link_type", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "url"],
+                name="link_unico_por_alumno",
+            )
+        ]
+
+    def __str__(self):
+        return self.title or self.url
+
+    def clean(self):
+        super().clean()
+
+        if not self.url:
+            return
+
+        parsed = urlparse(self.url)
+        hostname = parsed.hostname or ""
+
+        if parsed.scheme not in {"http", "https"}:
+            raise ValidationError(
+                {"url": "La URL tiene que empezar con http:// o https://."}
+            )
+
+        if self.link_type == StudentLinkType.LINKEDIN:
+            if not (hostname == "linkedin.com" or hostname.endswith(".linkedin.com")):
+                raise ValidationError(
+                    {"url": "Si el tipo es LinkedIn, la URL debe ser de linkedin.com."}
+                )
+
+        if self.link_type == StudentLinkType.GITHUB:
+            if not (hostname == "github.com" or hostname.endswith(".github.com")):
+                raise ValidationError(
+                    {"url": "Si el tipo es GitHub, la URL debe ser de github.com."}
+                )
