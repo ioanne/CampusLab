@@ -12,6 +12,7 @@ app necesita saber quien la usa.
 
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -55,8 +56,9 @@ def project_asset_upload_to(instance, filename):
     Una carpeta por proyecto y, adentro, una por tipo: asi la carpeta media se
     puede mirar a ojo y se entiende de quien es cada archivo.
     """
-    base_name = Path(filename).name
-    return f"projects/{instance.project.slug}/{instance.asset_type.lower()}/{base_name}"
+    extension = Path(filename).suffix
+    unique_name = f"{uuid4().hex}{extension}"
+    return f"projects/{instance.project.slug}/{instance.asset_type.lower()}/{unique_name}"
 
 
 class Project(models.Model):

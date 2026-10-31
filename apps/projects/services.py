@@ -10,8 +10,12 @@ Django: el service no sabe que existe HTTP. Traducirlo a un 400 es tarea de la
 API, con core.errors.validation_error.
 """
 
+from pathlib import Path
+
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from PIL import Image
 
 from apps.academics import selectors as academics_selectors
 from apps.catalogs import selectors as catalogs_selectors
@@ -26,6 +30,34 @@ from apps.projects.models import (
     ProjectStudent,
     ProjectTechnology,
 )
+
+IMAGE_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+
+
+def _validate_image(file):
+    if file.size > settings.MAX_IMAGE_SIZE_BYTES:
+        raise ValidationError(
+            {
+                "file": f"La imagen supera el tamaño máximo permitido de {settings.MAX_IMAGE_SIZE_MB} MB."
+            }
+        )
+
+    try:
+        file.seek(0)
+        with Image.open(file) as image:
+            if image.format not in settings.ALLOWED_IMAGE_FORMATS:
+                raise ValidationError(
+                    {"file": "Los formatos permitidos son JPG, PNG y WEBP."}
+                )
+            image_format = image.format
+            image.verify()
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
+        raise ValidationError(
+            {"file": "El archivo no contiene una imagen valida o esta danada."}
+        ) from exc
+    finally:
+        file.seek(0)
+    return image_format
 
 
 def _students_of_course(course, student_ids):
@@ -213,16 +245,31 @@ def upload_asset(project, *, asset_type, title, file, is_cover=False):
             }
         )
 
-    content_type = getattr(file, "content_type", "") or ""
-    if asset_type == AssetType.IMAGE and not content_type.startswith("image/"):
-        raise ValidationError({"file": "Para IMAGE se espera un archivo de imagen."})
-    if asset_type == AssetType.DOCUMENT and not content_type.startswith(
-        ("application/", "text/")
-    ):
-        raise ValidationError({"file": "Para DOCUMENT se espera un documento."})
-
-    if is_cover:
-        project.assets.filter(is_cover=True).update(is_cover=False)
+    if asset_type == AssetType.IMAGE:
+        image_count = project.assets.filter(asset_type=AssetType.IMAGE).count()
+        if image_count >= settings.MAX_IMAGES_PER_PROJECT:
+            raise ValidationError(
+                {
+                    "file": (
+                        "El proyecto ya alcanzó el máximo de "
+                        f"{settings.MAX_IMAGES_PER_PROJECT} imágenes."
+                    )
+                }
+            )
+        image_format = _validate_image(file)
+        file.name = f"{Path(file.name).stem}{IMAGE_EXTENSIONS[image_format]}"
+        has_cover = project.assets.filter(
+            asset_type=AssetType.IMAGE,
+            is_cover=True,
+        ).exists()
+        if is_cover or not has_cover:
+            project.assets.filter(is_cover=True).update(is_cover=False)
+            is_cover = True
+    else:
+        content_type = getattr(file, "content_type", "") or ""
+        if not content_type.startswith(("application/", "text/")):
+            raise ValidationError({"file": "Para DOCUMENT se espera un documento."})
+        is_cover = False
 
     return ProjectAsset.objects.create(
         project=project,
