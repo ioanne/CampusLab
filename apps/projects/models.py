@@ -120,6 +120,7 @@ class Project(models.Model):
         max_length=20,
         choices=ProjectKind.choices,
         default=ProjectKind.CLASS_WORK,
+        verbose_name="tipo",
     )
     status = models.CharField(
         max_length=10,

@@ -13,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='project',
             name='kind',
-            field=models.CharField(choices=[('CLASS_WORK', 'Trabajo de clase'), ('FINAL_PROJECT', 'Trabajo de fin de curso')], default='CLASS_WORK', max_length=20),
+            field=models.CharField(choices=[('CLASS_WORK', 'Trabajo de clase'), ('FINAL_PROJECT', 'Trabajo de fin de curso')], default='CLASS_WORK', max_length=20, verbose_name='tipo'),
         ),
     ]

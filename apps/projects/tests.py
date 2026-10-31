@@ -798,3 +798,24 @@ class ProjectKindTests(ProjectScenario):
         body = self._post_project(kind=ProjectKind.FINAL_PROJECT).json()
         self.assertEqual(body["kind"], ProjectKind.FINAL_PROJECT)
         self.assertEqual(body["kind_label"], "Trabajo de fin de curso")
+
+    def test_an_invalid_kind_is_rejected(self):
+        response = self._post_project(kind="TESIS")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("kind", json.dumps(response.json()))
+        self.assertFalse(Project.objects.exists())
+
+    def test_a_teacher_changes_the_kind(self):
+        project = Project.objects.get(pk=self._post_project().json()["id"])
+        response = self._patch_project(project, {"kind": ProjectKind.FINAL_PROJECT})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["kind"], ProjectKind.FINAL_PROJECT)
+        project.refresh_from_db()
+        self.assertEqual(project.kind, ProjectKind.FINAL_PROJECT)
+
+    def test_an_invalid_kind_is_rejected_on_update(self):
+        project = Project.objects.get(pk=self._post_project().json()["id"])
+        response = self._patch_project(project, {"kind": "TESIS"})
+        self.assertEqual(response.status_code, 400)
+        project.refresh_from_db()
+        self.assertEqual(project.kind, ProjectKind.CLASS_WORK)
