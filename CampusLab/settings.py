@@ -177,3 +177,9 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "no-responder@bancodeproyectos.ed
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 ALLOWED_REPOSITORY_HOSTS = ["github.com", "gitlab.com", "bitbucket.org"]
+
+# tamaño máximo de imagenes en MB, por defecto 5MB
+MAX_IMAGE_SIZE_MB = int(env("MAX_IMAGE_SIZE_MB", "5"))
+MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
+ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
+MAX_IMAGES_PER_PROJECT = int(env("MAX_IMAGES_PER_PROJECT", "10"))

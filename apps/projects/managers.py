@@ -85,6 +85,7 @@ class ProjectQuerySet(models.QuerySet):
             "course",
             "course__career",
             "course__career__institution",
+            "course__subject",
             "course__teacher",
             "reviewed_by",
         ).prefetch_related(

@@ -10,6 +10,8 @@ from apps.academics.schemas import (
     CourseOut,
     EnrollmentOut,
     EnrollStudentIn,
+    SubjectIn,
+    SubjectOut,
 )
 from apps.accounts.models import UserRole
 from apps.accounts.permissions import institution_or_admin, teacher_or_admin
@@ -52,6 +54,19 @@ def ensure_course_of_institution(user, course):
         raise HttpError(403, "La cursada pertenece a otra institucion.")
 
 
+def ensure_career_of_institution(user, career):
+    """La institucion toca solo sus propias carreras.
+
+    Es la misma pregunta que ensure_course_of_institution, un escalon mas
+    arriba: las materias cuelgan de la carrera, no de una cursada.
+    """
+    if user.role == UserRole.ADMIN:
+        return
+    institution = current_institution(user)
+    if career.institution_id != institution.id:
+        raise HttpError(403, "La carrera pertenece a otra institucion.")
+
+
 # --------------------------------------------------------------------------
 # Publico
 # --------------------------------------------------------------------------
@@ -80,10 +95,59 @@ def create_career(request, payload: CareerIn):
         raise validation_error(exc) from exc
 
 
+@institution_router.get("/careers/{career_id}/subjects", response=list[SubjectOut])
+def list_career_subjects(request, career_id: int):
+    career = selectors.career(career_id)
+    ensure_career_of_institution(request.auth, career)
+    return selectors.subjects_of_career(career)
+
+
+@institution_router.post("/careers/{career_id}/subjects", response=SubjectOut)
+def create_subject(request, career_id: int, payload: SubjectIn):
+    career = selectors.career(career_id)
+    ensure_career_of_institution(request.auth, career)
+    try:
+        return services.create_subject(career, **payload.model_dump())
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+
 @institution_router.get("/courses", response=list[CourseOut])
 def list_institution_courses(request):
     institution = current_institution(request.auth)
     return selectors.courses_of_institution(institution)
+
+
+@institution_router.get("/courses/{course_id}/students", response=list[EnrollmentOut])
+def list_institution_course_students(request, course_id: int):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    return selectors.enrollments_of_course(course)
+
+
+@institution_router.post("/courses/{course_id}/students", response=EnrollmentOut)
+def enroll_student_as_institution(request, course_id: int, payload: EnrollStudentIn):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    try:
+        return services.enroll_student(course, **payload.model_dump())
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+
+@institution_router.delete("/courses/{course_id}/students/{enrollment_id}")
+def remove_enrollment_as_institution(request, course_id: int, enrollment_id: int):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+
+    # La inscripcion se busca dentro de la cursada: un id de otra comision da
+    # 404 y no llega nunca al service.
+    enrollment = selectors.enrollment(course, enrollment_id)
+    try:
+        services.remove_enrollment(enrollment)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
 
 
 # --------------------------------------------------------------------------

@@ -7,10 +7,19 @@ pruebas y las demas heredan de ella.
 import json
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.db import IntegrityError, connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase
 
 from apps.academics import selectors
-from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student
+from apps.academics.models import (
+    Career,
+    Course,
+    CourseStudent,
+    CourseTerm,
+    Student,
+    Subject,
+)
 from apps.accounts.models import UserRole
 from apps.institutions.models import (
     Institution,
@@ -57,6 +66,7 @@ class AcademicsTestCase(TestCase):
             institution=self.institution,
             name="Desarrollo de Software",
         )
+        self.subject = Subject.objects.create(career=self.career, name="Programacion I")
 
     def _login(self, email, password):
         response = self.client.post(
@@ -78,6 +88,7 @@ class AcademicsTestCase(TestCase):
     def _create_course(self, name="1C - Noche", teacher=None, year=2026):
         return Course.objects.create(
             career=self.career,
+            subject=self.subject,
             teacher=teacher or self.teacher,
             name=name,
             year=year,
@@ -114,6 +125,97 @@ class CareerApiTests(AcademicsTestCase):
         self.assertEqual(Career.objects.filter(institution=self.institution).count(), 1)
 
 
+class SubjectModelTests(AcademicsTestCase):
+    def test_subject_name_is_unique_within_its_career(self):
+        """La base sostiene la regla aunque alguien saltee el service."""
+        with self.assertRaises(IntegrityError):
+            Subject.objects.create(career=self.career, name="Programacion I")
+
+
+class SubjectApiTests(AcademicsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.access = self._login("rectoria@ifts18.edu.ar", "Rectoria12345!")
+
+    def _url(self, career):
+        return f"/api/institution/careers/{career.id}/subjects"
+
+    def _get(self, url):
+        return self.client.get(url, HTTP_AUTHORIZATION=f"Bearer {self.access}")
+
+    def test_institution_creates_a_subject_in_its_career(self):
+        response = self._post(self._url(self.career), {"name": "  Base de Datos "}, self.access)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "Base de Datos")
+        self.assertEqual(response.json()["career_id"], self.career.id)
+        self.assertTrue(
+            Subject.objects.filter(career=self.career, name="Base de Datos").exists()
+        )
+
+    def test_subject_name_cannot_repeat_in_the_same_career(self):
+        """Mismo criterio que la carrera: no distingue mayusculas ni espacios de mas."""
+        response = self._post(self._url(self.career), {"name": " programacion i "}, self.access)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Subject.objects.filter(career=self.career).count(), 1)
+
+    def test_the_same_subject_name_is_fine_in_another_career(self):
+        """Cada carrera tiene su plan: las dos pueden dictar Programacion I."""
+        other_career = Career.objects.create(
+            institution=self.institution, name="Analisis de Sistemas"
+        )
+
+        response = self._post(self._url(other_career), {"name": "Programacion I"}, self.access)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_blank_name_is_rejected(self):
+        response = self._post(self._url(self.career), {"name": "   "}, self.access)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Subject.objects.filter(career=self.career).count(), 1)
+
+    def test_institution_lists_only_the_subjects_of_that_career(self):
+        other_career = Career.objects.create(
+            institution=self.institution, name="Analisis de Sistemas"
+        )
+        Subject.objects.create(career=other_career, name="Base de Datos")
+
+        response = self._get(self._url(self.career))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([s["name"] for s in response.json()], ["Programacion I"])
+
+    def test_a_career_of_another_institution_is_forbidden(self):
+        other_institution = Institution.objects.create(name="IFTS 24", city="CABA")
+        foreign_career = Career.objects.create(
+            institution=other_institution, name="Desarrollo de Software"
+        )
+
+        listing = self._get(self._url(foreign_career))
+        creation = self._post(self._url(foreign_career), {"name": "Programacion I"}, self.access)
+
+        self.assertEqual(listing.status_code, 403)
+        self.assertEqual(creation.status_code, 403)
+        self.assertFalse(Subject.objects.filter(career=foreign_career).exists())
+
+    def test_admin_manages_the_subjects_of_any_career(self):
+        """El administrador no representa a ninguna institucion: destraba."""
+        self.user_model.objects.create_user(
+            email="admin@campuslab.edu.ar",
+            password="Admin12345!",
+            first_name="Ada",
+            last_name="Admin",
+            role=UserRole.ADMIN,
+        )
+        self.access = self._login("admin@campuslab.edu.ar", "Admin12345!")
+
+        response = self._post(self._url(self.career), {"name": "Base de Datos"}, self.access)
+
+        self.assertEqual(response.status_code, 200)
+
+
 class CourseApiTests(AcademicsTestCase):
     def test_member_teacher_creates_course(self):
         access = self._login("diana@docentes.edu.ar", "Docente12345!")
@@ -122,6 +224,7 @@ class CourseApiTests(AcademicsTestCase):
             "/api/teacher/courses",
             {
                 "career_id": self.career.id,
+                "subject_id": self.subject.id,
                 "name": "1C - Noche",
                 "year": 2026,
                 "term": CourseTerm.FIRST.value,
@@ -148,6 +251,7 @@ class CourseApiTests(AcademicsTestCase):
             "/api/teacher/courses",
             {
                 "career_id": self.career.id,
+                "subject_id": self.subject.id,
                 "name": "1C - Noche",
                 "year": 2026,
                 "term": CourseTerm.FIRST.value,
@@ -167,6 +271,7 @@ class CourseApiTests(AcademicsTestCase):
             "/api/teacher/courses",
             {
                 "career_id": self.career.id,
+                "subject_id": self.subject.id,
                 "name": "1C - Noche",
                 "year": 2026,
                 "term": CourseTerm.FIRST.value,
@@ -184,6 +289,7 @@ class CourseApiTests(AcademicsTestCase):
             "/api/teacher/courses",
             {
                 "career_id": self.career.id,
+                "subject_id": self.subject.id,
                 "name": "1C - Noche",
                 "year": 2026,
                 "term": "VERANO",
@@ -192,6 +298,69 @@ class CourseApiTests(AcademicsTestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+        self.assertFalse(Course.objects.exists())
+
+    def test_course_comes_back_with_its_subject(self):
+        access = self._login("diana@docentes.edu.ar", "Docente12345!")
+
+        response = self._post(
+            "/api/teacher/courses",
+            {
+                "career_id": self.career.id,
+                "subject_id": self.subject.id,
+                "name": "1C - Noche",
+                "year": 2026,
+                "term": CourseTerm.FIRST.value,
+            },
+            access,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["subject"],
+            {"id": self.subject.id, "name": "Programacion I", "career_id": self.career.id},
+        )
+        self.assertEqual(Course.objects.get().subject, self.subject)
+
+    def test_subject_of_another_career_is_rejected(self):
+        """La materia y la cursada tienen que ser de la misma carrera."""
+        other_career = Career.objects.create(
+            institution=self.institution, name="Analisis de Sistemas"
+        )
+        foreign_subject = Subject.objects.create(career=other_career, name="Base de Datos")
+        access = self._login("diana@docentes.edu.ar", "Docente12345!")
+
+        response = self._post(
+            "/api/teacher/courses",
+            {
+                "career_id": self.career.id,
+                "subject_id": foreign_subject.id,
+                "name": "1C - Noche",
+                "year": 2026,
+                "term": CourseTerm.FIRST.value,
+            },
+            access,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("subject_id", response.json()["detail"])
+        self.assertFalse(Course.objects.exists())
+
+    def test_subject_is_required(self):
+        access = self._login("diana@docentes.edu.ar", "Docente12345!")
+
+        response = self._post(
+            "/api/teacher/courses",
+            {
+                "career_id": self.career.id,
+                "name": "1C - Noche",
+                "year": 2026,
+                "term": CourseTerm.FIRST.value,
+            },
+            access,
+        )
+
+        self.assertEqual(response.status_code, 422)
         self.assertFalse(Course.objects.exists())
 
     def test_course_answers_its_institution_through_the_career(self):
@@ -312,3 +481,204 @@ class EnrollmentApiTests(AcademicsTestCase):
         )
 
         self.assertEqual(list(found), [enrolled])
+
+
+class InstitutionEnrollmentApiTests(AcademicsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.course = self._create_course()
+        self.access = self._login("rectoria@ifts18.edu.ar", "Rectoria12345!")
+
+        other_institution = Institution.objects.create(name="IFTS 11", city="CABA")
+        other_career = Career.objects.create(
+            institution=other_institution, name="Analisis de Sistemas"
+        )
+        other_teacher = self.user_model.objects.create_user(
+            email="otro@docentes.edu.ar",
+            password="Docente12345!",
+            first_name="Omar",
+            last_name="Otro",
+            role=UserRole.TEACHER,
+        )
+        self.foreign_course = Course.objects.create(
+            career=other_career,
+            subject=Subject.objects.create(career=other_career, name="Base de Datos"),
+            teacher=other_teacher,
+            name="1C - Manana",
+            year=2026,
+            term=CourseTerm.FIRST,
+        )
+
+    def _url(self, course):
+        return f"/api/institution/courses/{course.id}/students"
+
+    def _enroll(self, course, first_name="Ana", last_name="Gomez", email=""):
+        return self._post(
+            self._url(course),
+            {"first_name": first_name, "last_name": last_name, "email": email},
+            self.access,
+        )
+
+    def _get(self, course):
+        return self.client.get(
+            self._url(course), HTTP_AUTHORIZATION=f"Bearer {self.access}"
+        )
+
+    def _delete(self, course, enrollment):
+        return self.client.delete(
+            f"{self._url(course)}/{enrollment.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access}",
+        )
+
+    def test_institution_enrolls_a_student_in_its_course(self):
+        response = self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["student"]["full_name"], "Ana Gomez")
+        student = Student.objects.get(email="ana@alumnos.edu.ar")
+        self.assertEqual(student.institution, self.institution)
+        self.assertTrue(
+            CourseStudent.objects.filter(course=self.course, student=student).exists()
+        )
+
+    def test_institution_cannot_enroll_in_a_course_of_another_institution(self):
+        response = self._enroll(self.foreign_course, email="ana@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(CourseStudent.objects.exists())
+
+    def test_the_same_email_reuses_the_student_of_the_institution(self):
+        other_course = self._create_course(name="2C - Manana")
+
+        self._enroll(self.course, email="ana@alumnos.edu.ar")
+        response = self._enroll(other_course, email="ANA@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Student.objects.count(), 1)
+        self.assertEqual(CourseStudent.objects.count(), 2)
+
+    def test_student_cannot_be_enrolled_twice_in_the_same_course(self):
+        self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        response = self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(CourseStudent.objects.filter(course=self.course).count(), 1)
+
+    def test_institution_lists_the_students_of_its_course(self):
+        self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        response = self._get(self.course)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [e["student"]["email"] for e in response.json()], ["ana@alumnos.edu.ar"]
+        )
+
+    def test_institution_cannot_list_the_students_of_another_institution(self):
+        response = self._get(self.foreign_course)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_institution_removes_an_enrollment_and_keeps_the_student(self):
+        self._enroll(self.course, email="ana@alumnos.edu.ar")
+        enrollment = CourseStudent.objects.get(course=self.course)
+
+        response = self._delete(self.course, enrollment)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(CourseStudent.objects.filter(pk=enrollment.pk).exists())
+        self.assertTrue(Student.objects.filter(email="ana@alumnos.edu.ar").exists())
+
+    def test_institution_cannot_remove_an_enrollment_of_another_institution(self):
+        student = Student.objects.create(
+            institution=self.foreign_course.institution,
+            first_name="Luis",
+            last_name="Perez",
+        )
+        enrollment = CourseStudent.objects.create(
+            course=self.foreign_course, student=student
+        )
+
+        response = self._delete(self.foreign_course, enrollment)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(CourseStudent.objects.filter(pk=enrollment.pk).exists())
+
+    def test_teacher_cannot_use_the_institution_endpoints(self):
+        self.access = self._login("diana@docentes.edu.ar", "Docente12345!")
+
+        response = self._enroll(self.course, email="ana@alumnos.edu.ar")
+
+        self.assertEqual(response.status_code, 403)
+
+
+class UnassignedSubjectMigrationTests(TransactionTestCase):
+    """La migracion en dos pasos, sobre una base que ya tenia cursadas.
+
+    Corre las migraciones de verdad: vuelve academics a la 0002 (la columna
+    nullable), carga cursadas sin materia con los modelos de ese momento y
+    avanza hasta la 0004. Una migracion de datos no se puede probar de otra
+    forma: con los modelos de hoy la cursada sin materia ni siquiera se puede
+    crear.
+    """
+
+    before = [("academics", "0002_subject_course_subject")]
+    after = [("academics", "0004_alter_course_subject")]
+
+    def setUp(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.before)
+        old_apps = executor.loader.project_state(self.before).apps
+
+        Institution = old_apps.get_model("institutions", "Institution")
+        User = old_apps.get_model("accounts", "User")
+        Career = old_apps.get_model("academics", "Career")
+        Course = old_apps.get_model("academics", "Course")
+
+        institution = Institution.objects.create(name="IFTS 18")
+        teacher = User.objects.create(
+            email="diana@docentes.edu.ar",
+            first_name="Diana",
+            last_name="Docente",
+            role="TEACHER",
+        )
+        self.career_id = Career.objects.create(
+            institution=institution, name="Desarrollo de Software"
+        ).id
+        self.empty_career_id = Career.objects.create(
+            institution=institution, name="Analisis de Sistemas"
+        ).id
+        # Dos cursadas en la misma carrera: tienen que compartir una sola
+        # "Sin asignar", no una cada una.
+        for name in ["1C - Noche", "2C - Manana"]:
+            Course.objects.create(
+                career_id=self.career_id,
+                teacher=teacher,
+                name=name,
+                year=2025,
+                term="FIRST",
+            )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.after)
+        self.apps = executor.loader.project_state(self.after).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_each_career_with_courses_gets_one_unassigned_subject(self):
+        Subject = self.apps.get_model("academics", "Subject")
+        Course = self.apps.get_model("academics", "Course")
+
+        subjects = list(Subject.objects.filter(career_id=self.career_id))
+
+        self.assertEqual([subject.name for subject in subjects], ["Sin asignar"])
+        self.assertEqual(Course.objects.filter(subject=subjects[0]).count(), 2)
+        self.assertFalse(Course.objects.filter(subject__isnull=True).exists())
+
+    def test_a_career_without_courses_gets_no_filler_subject(self):
+        Subject = self.apps.get_model("academics", "Subject")
+
+        self.assertFalse(Subject.objects.filter(career_id=self.empty_career_id).exists())

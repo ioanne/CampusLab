@@ -45,6 +45,7 @@ class ProjectAdmin(admin.ModelAdmin):
         "team_name",
         "course",
         "institution",
+        "kind",
         "status",
         "created_at",
     ]
@@ -63,6 +64,7 @@ class ProjectAdmin(admin.ModelAdmin):
     ]
     list_filter = [
         "status",
+        "kind",
         "course__year",
         "course__term",
         "course__career__institution",
