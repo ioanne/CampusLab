@@ -18,14 +18,26 @@ class CareerOut(Schema):
         return obj.institution.name
 
 
+class SubjectIn(Schema):
+    name: str
+
+
+class SubjectOut(Schema):
+    id: int
+    name: str
+    career_id: int
+
+
 class CourseIn(Schema):
     """Lo que manda el docente para abrir una cursada.
 
     El ciclo lectivo son dos campos sueltos y no el id de otra tabla: year es el
-    ano y term una de las opciones de CourseTerm.
+    ano y term una de las opciones de CourseTerm. La materia tiene que ser de esa
+    misma carrera: lo controla el service.
     """
 
     career_id: int
+    subject_id: int
     name: str
     year: int
     term: str
@@ -38,6 +50,7 @@ class CourseOut(Schema):
     term: str
     term_label: str
     career: CareerOut
+    subject: SubjectOut
     teacher_name: str
 
     @staticmethod
