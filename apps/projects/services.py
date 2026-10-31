@@ -170,23 +170,9 @@ def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **d
 
 
 @transaction.atomic
-def update_project(project, *, changes):
-    """Aplica solo lo que vino y vuelve el proyecto a la cola de revision.
-
-    Editar un proyecto lo devuelve a PENDING: lo que esta publicado tiene que
-    ser siempre una version que la institucion vio. Se limpian quien reviso y
-    cuando, porque esa revision ya no corresponde a este texto. Al docente con
-    privilegio no lo devuelve a la cola, por el mismo motivo por el que no lo
-    hizo al crearlo: su edicion tambien sale publicada.
-
-    La devolucion escrita (review_notes), en cambio, NO se borra: el docente la
-    sigue teniendo a la vista mientras corrige, que es justamente para lo que se
-    la escribieron. Se reemplaza sola en la proxima revision.
-
-    La cursada no esta entre los campos editables. Cambiarla cambiaria de golpe
-    la institucion, la carrera y el docente del proyecto, y dejaria adentro
-    alumnos de otra comision: si un trabajo se cargo en la cursada equivocada,
-    se carga de nuevo donde va.
+def update_project(project, *, changes, reviewer=None):
+    """
+    `reviewer` es la institucion, cuando es ella la que edita. Su edicion no vuelve a PENDING: queda aprobada y firmada por ella, igual que cuando carga.
     """
     technology_ids = changes.pop("technology_ids", None)
     student_ids = changes.pop("student_ids", None)
@@ -196,9 +182,12 @@ def update_project(project, *, changes):
     for field, value in changes.items():
         setattr(project, field, value)
 
-    project.status = _initial_status(project.course)
-    project.reviewed_by = None
-    project.reviewed_at = None
+    if reviewer is not None:
+        project.review(ProjectStatus.APPROVED, reviewer=reviewer, save=False)
+    else:
+        project.status = _initial_status(project.course)
+        project.reviewed_by = None
+        project.reviewed_at = None
     project.save()
 
     if technology_ids is not None:
