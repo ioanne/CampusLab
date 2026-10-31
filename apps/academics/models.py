@@ -8,6 +8,7 @@ from apps.academics.managers import (
     CourseQuerySet,
     CourseStudentQuerySet,
     StudentQuerySet,
+    SubjectQuerySet,
 )
 
 
@@ -49,6 +50,43 @@ class Career(models.Model):
         return f"{self.name} ({self.institution.name})"
 
 
+class Subject(models.Model):
+    """Materia de una carrera: lo que se dicta en una cursada.
+
+    Cuelga de la carrera y no de la institucion por la misma razon que la
+    carrera cuelga de la institucion: "Programacion I" de Desarrollo de Software
+    y la de Analisis de Sistemas son materias distintas, cada una de su plan.
+
+    El nombre es unico por carrera. La restriccion de la base compara tal cual;
+    el service compara sin distinguir mayusculas, igual que con las carreras.
+    """
+
+    career = models.ForeignKey(
+        Career,
+        on_delete=models.CASCADE,
+        related_name="subjects",
+        verbose_name="carrera",
+    )
+    name = models.CharField(max_length=180)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = SubjectQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "materia"
+        verbose_name_plural = "materias"
+        ordering = ["career__name", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["career", "name"],
+                name="materia_unica_por_carrera",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.career.name})"
+
+
 class CourseTerm(models.TextChoices):
     """Cuando se dicta la cursada dentro del ano."""
 
@@ -78,6 +116,12 @@ class Course(models.Model):
         Career,
         on_delete=models.CASCADE,
         related_name="courses",
+    )
+    subject = models.ForeignKey(
+        Subject,
+        on_delete=models.PROTECT,
+        related_name="courses",
+        verbose_name="materia",
     )
     teacher = models.ForeignKey(
         settings.AUTH_USER_MODEL,

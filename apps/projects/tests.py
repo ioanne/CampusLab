@@ -9,14 +9,24 @@ transaccion que vuelve atras, el estado con el que nace un proyecto).
 import json
 import shutil
 import tempfile
+from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from PIL import Image
 
-from apps.academics.models import Career, Course, CourseStudent, CourseTerm, Student
+from apps.academics.models import (
+    Career,
+    Course,
+    CourseStudent,
+    CourseTerm,
+    Student,
+    Subject,
+)
 from apps.accounts.models import UserRole
 from apps.catalogs.models import Technology
 from apps.institutions.models import (
@@ -27,7 +37,13 @@ from apps.institutions.models import (
     MembershipStatus,
 )
 from apps.projects import selectors, services
-from apps.projects.models import AssetType, LinkType, Project, ProjectStatus
+from apps.projects.models import (
+    AssetType,
+    LinkType,
+    Project,
+    ProjectKind,
+    ProjectStatus,
+)
 from apps.projects.schemas import ProjectFilters
 
 TEST_MEDIA_ROOT = Path(tempfile.mkdtemp(prefix="banco-proyectos-media-"))
@@ -74,9 +90,11 @@ class ProjectScenario(TestCase):
             institution=self.institution,
             name="Desarrollo de Software",
         )
+        self.subject = Subject.objects.create(career=self.career, name="Programacion I")
         # Dos cursadas del mismo docente: el MVP pide que pueda tener mas de una.
         self.course = Course.objects.create(
             career=self.career,
+            subject=self.subject,
             teacher=self.teacher,
             name="1C - Noche",
             year=2026,
@@ -84,6 +102,7 @@ class ProjectScenario(TestCase):
         )
         self.other_course = Course.objects.create(
             career=self.career,
+            subject=self.subject,
             teacher=self.teacher,
             name="2C - Manana",
             year=2026,
@@ -276,10 +295,69 @@ class ProjectUploadTests(ProjectScenario):
         self.assertEqual(body["repository_url"], "")
         self.assertEqual(body["technologies"], [])
 
-    def test_the_repository_has_to_be_github(self):
-        response = self._post_project(repository_url="https://gitlab.com/ifts/museo")
+    def test_the_repository_has_to_be_github_gitlab_or_bitbucket(self):
+        for url in (
+            "https://github.com/ifts/museo",
+            "https://gitlab.com/ifts/museo",
+            "https://bitbucket.org/ifts/museo",
+            "https://www.github.com/ifts/museo",
+            "https://www.gitlab.com/ifts/museo",
+            "https://www.bitbucket.org/ifts/museo",
+            "https://GitHub.com/ifts/museo",
+        ):
+            with self.subTest(url=url):
+                response = self._post_project(repository_url=url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["repository_url"], url)
+
+    def test_the_repository_has_to_be_an_allowed_host(self):
+        response = self._post_project(repository_url="https://codeberg.org/ifts/museo")
+        self.assertEqual(response.status_code, 400)
+        body = json.dumps(response.json())
+        self.assertIn("repository_url", body)
+        for host in ("github.com", "gitlab.com", "bitbucket.org"):
+            self.assertIn(host, body)
+
+    def test_the_repository_has_to_be_https(self):
+        response = self._post_project(repository_url="http://github.com/ifts/museo")
         self.assertEqual(response.status_code, 400)
         self.assertIn("repository_url", json.dumps(response.json()))
+
+    def test_a_host_that_only_looks_like_an_allowed_one_is_rejected(self):
+        for url in (
+            "https://github.com.evil.com/ifts/museo",
+            "https://notgithub.com/ifts/museo",
+            "https://gitlab.com@evil.com/ifts/museo",
+            "https://pages.github.com/ifts/museo",
+        ):
+            with self.subTest(url=url):
+                response = self._post_project(repository_url=url)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("repository_url", json.dumps(response.json()))
+
+    @override_settings(ALLOWED_REPOSITORY_HOSTS=["codeberg.org"])
+    def test_the_allowed_hosts_come_from_settings(self):
+        accepted = self._post_project(repository_url="https://codeberg.org/ifts/museo")
+        rejected = self._post_project(repository_url="https://github.com/ifts/museo")
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("codeberg.org", json.dumps(rejected.json()))
+
+    def test_editing_the_repository_is_validated_too(self):
+        project = Project.objects.get(pk=self._post_project().json()["id"])
+
+        response = self.client.patch(
+            f"/api/teacher/projects/{project.id}",
+            data=json.dumps({"repository_url": "https://codeberg.org/ifts/museo"}),
+            content_type="application/json",
+            headers=self._headers("diana@docentes.edu.ar"),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("repository_url", json.dumps(response.json()))
+        project.refresh_from_db()
+        self.assertEqual(project.repository_url, "https://github.com/ifts/museo-virtual")
 
     def test_a_project_needs_at_least_one_student(self):
         response = self._post_project(student_ids=[])
@@ -320,6 +398,18 @@ class ProjectUploadTests(ProjectScenario):
         response = self.client.delete(
             f"/api/teacher/courses/{self.course.id}/students/{enrollment.id}",
             headers=self._headers("diana@docentes.edu.ar"),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(CourseStudent.objects.filter(pk=enrollment.pk).exists())
+
+    def test_the_institution_cannot_remove_a_student_with_a_project(self):
+        self._create_project(students=[self.ana])
+        enrollment = CourseStudent.objects.get(course=self.course, student=self.ana)
+
+        response = self.client.delete(
+            f"/api/institution/courses/{self.course.id}/students/{enrollment.id}",
+            headers=self._headers("rectoria@ifts18.edu.ar", "Rectoria12345!"),
         )
 
         self.assertEqual(response.status_code, 400)
@@ -445,6 +535,129 @@ class ProjectFilesAndLinksTests(ProjectScenario):
             headers=self._headers("hugo@docentes.edu.ar"),
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_a_text_file_renamed_to_png_is_rejected(self):
+        """1. Subir un .txt renombrado a .png debe responder 400."""
+        falso_png = SimpleUploadedFile(
+            "nota.png",
+            b"Esto es texto plano disfrazado de imagen",
+            "image/png",
+        )
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": falso_png,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("file", json.dumps(response.json()))
+
+    def test_a_valid_gif_is_rejected_as_an_unsupported_format(self):
+        image_buffer = BytesIO()
+        Image.new("RGB", (1, 1), color="white").save(image_buffer, format="GIF")
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile(
+                    "captura.gif", image_buffer.getvalue(), "image/gif"
+                ),
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+
+    @override_settings(MAX_IMAGE_SIZE_BYTES=len(PNG_DE_UN_PIXEL) - 1)
+    def test_an_image_exceeding_max_size_is_rejected(self):
+        """2. Un archivo que supera el límite de tamaño debe responder 400."""
+        archivo_pesado = SimpleUploadedFile(
+            "gigante.png",
+            PNG_DE_UN_PIXEL,
+            "image/png",
+        )
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": archivo_pesado,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("tamaño máximo", json.dumps(response.json(), ensure_ascii=False))
+
+    def test_first_uploaded_image_becomes_cover_automatically(self):
+        """3. La primera imagen subida queda como portada aunque no se pida explícitamente."""
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "title": "Primera imagen",
+                "file": SimpleUploadedFile("primera.png", PNG_DE_UN_PIXEL, "image/png"),
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["is_cover"])
+
+    @override_settings(MAX_IMAGES_PER_PROJECT=1)
+    def test_project_image_limit_is_enforced(self):
+        first_response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile("primera.png", PNG_DE_UN_PIXEL, "image/png"),
+            },
+            headers=self.headers,
+        )
+        second_response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile("segunda.png", PNG_DE_UN_PIXEL, "image/png"),
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 400)
+        self.assertEqual(self.project.assets.filter(asset_type=AssetType.IMAGE).count(), 1)
+
+    def test_uploaded_image_uses_uuid_filename_and_keeps_extension(self):
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile(
+                    "nombre enviado.png", PNG_DE_UN_PIXEL, "image/png"
+                ),
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        saved_name = Path(self.project.assets.get().file.name).name
+        self.assertEqual(Path(saved_name).suffix, ".png")
+        UUID(Path(saved_name).stem)
+
+    def test_uploaded_image_extension_comes_from_its_real_format(self):
+        image_buffer = BytesIO()
+        Image.new("RGB", (1, 1), color="white").save(image_buffer, format="JPEG")
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile(
+                    "captura.png", image_buffer.getvalue(), "image/png"
+                ),
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Path(self.project.assets.get().file.name).suffix, ".jpg")
 
 
 class ProjectReviewTests(ProjectScenario):
@@ -637,8 +850,10 @@ class PublishingPrivilegeTests(ProjectScenario):
         otra_carrera = Career.objects.create(
             institution=self.other_institution, name="Analisis de Sistemas"
         )
+        otra_materia = Subject.objects.create(career=otra_carrera, name="Programacion I")
         otra_cursada = Course.objects.create(
             career=otra_carrera,
+            subject=otra_materia,
             teacher=self.teacher,
             name="1C - Noche",
             year=2026,
@@ -770,3 +985,69 @@ class PublicCatalogTests(ProjectScenario):
         self.assertEqual(
             [p.title for p in selectors.public_catalog(filtros)], ["Museo Virtual"]
         )
+
+
+class ProjectKindTests(ProjectScenario):
+    """Trabajo de clase o trabajo de fin de curso."""
+
+    def _patch_project(self, project, changes):
+        return self.client.patch(
+            f"/api/teacher/projects/{project.id}",
+            data=json.dumps(changes),
+            content_type="application/json",
+            headers=self._headers("diana@docentes.edu.ar"),
+        )
+
+    def test_a_project_is_class_work_by_default(self):
+        body = self._post_project().json()
+        self.assertEqual(body["kind"], ProjectKind.CLASS_WORK)
+        self.assertEqual(body["kind_label"], "Trabajo de clase")
+
+    def test_a_teacher_uploads_a_final_project(self):
+        body = self._post_project(kind=ProjectKind.FINAL_PROJECT).json()
+        self.assertEqual(body["kind"], ProjectKind.FINAL_PROJECT)
+        self.assertEqual(body["kind_label"], "Trabajo de fin de curso")
+
+    def test_an_invalid_kind_is_rejected(self):
+        response = self._post_project(kind="TESIS")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("kind", json.dumps(response.json()))
+        self.assertFalse(Project.objects.exists())
+
+    def test_a_teacher_changes_the_kind(self):
+        project = Project.objects.get(pk=self._post_project().json()["id"])
+        response = self._patch_project(project, {"kind": ProjectKind.FINAL_PROJECT})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["kind"], ProjectKind.FINAL_PROJECT)
+        project.refresh_from_db()
+        self.assertEqual(project.kind, ProjectKind.FINAL_PROJECT)
+
+    def test_an_invalid_kind_is_rejected_on_update(self):
+        project = Project.objects.get(pk=self._post_project().json()["id"])
+        response = self._patch_project(project, {"kind": "TESIS"})
+        self.assertEqual(response.status_code, 400)
+        project.refresh_from_db()
+        self.assertEqual(project.kind, ProjectKind.CLASS_WORK)
+
+
+class ProjectSubjectTests(ProjectScenario):
+    def test_the_project_answers_its_subject_through_the_course(self):
+        """El proyecto no guarda la materia y sin embargo la sabe."""
+        project = self._create_project()
+
+        self.assertEqual(project.subject, self.subject)
+
+    def test_the_public_ficha_shows_the_subject_of_its_course(self):
+        project = self._create_project()
+
+        response = self.client.get(f"/api/projects/{project.slug}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["course"]["subject"]["name"], "Programacion I")
+
+    def test_the_subject_comes_with_the_project_without_extra_queries(self):
+        """with_related trae la materia en la misma consulta que la cursada."""
+        project = selectors.full_project(self._create_project().id)
+
+        with self.assertNumQueries(0):
+            self.assertEqual(project.subject.name, "Programacion I")

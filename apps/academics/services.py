@@ -11,7 +11,13 @@ from django.db import transaction
 
 from apps.academics import selectors
 from apps.academics.models import (
-    Career, Course, CourseStudent, CourseTerm, Student, StudentLink,
+    Career,
+    Course,
+    CourseStudent,
+    CourseTerm,
+    Student,
+    StudentLink,
+    Subject,
 )
 from apps.accounts.models import UserRole
 from apps.institutions import selectors as institutions_selectors
@@ -25,13 +31,52 @@ def create_career(institution, *, name):
     return Career.objects.create(institution=institution, name=name)
 
 
-def create_course(teacher, *, career_id, name, year, term):
-    """Alta de una cursada, hecha por el docente que la va a dictar."""
+def create_subject(career, *, name):
+    """Alta de una materia de la carrera.
+
+    Mismo criterio que create_career: el nombre se compara sin distinguir
+    mayusculas, porque "Programacion I" y "programacion i" son la misma materia
+    y la restriccion de la base, que compara tal cual, no lo notaria.
+    """
+    name = name.strip()
+    if not name:
+        raise ValidationError({"name": "La materia necesita un nombre."})
+    if Subject.objects.of_career(career).filter(name__iexact=name).exists():
+        raise ValidationError({"name": "La carrera ya tiene una materia con ese nombre."})
+    return Subject.objects.create(career=career, name=name)
+
+
+def create_course(teacher, *, career_id, subject_id, name, year, term):
+    """Alta de una cursada, hecha por el docente que la va a dictar.
+
+    Aca aparece la regla de permisos del docente: no alcanza con tener el rol
+    TEACHER (eso solo abre la puerta del router), hay que tener la membresia
+    aceptada en la institucion duena de la carrera. El administrador queda
+    afuera de la regla porque no representa a ninguna institucion: destraba.
+
+    La cursada guarda su carrera y su materia, y la materia ya sabe de que
+    carrera es: que las dos coincidan no lo puede garantizar la base, asi que
+    se pregunta aca.
+
+    El periodo llega como texto desde la API, asi que se valida contra las
+    opciones antes de guardar: el choices del modelo no valida solo en un
+    create(), solo arma el formulario y el admin.
+
+    La comision repetida se busca antes de crearla: la restriccion de la base
+    la rechazaria igual, pero como IntegrityError, y la API devolveria un 500
+    en vez de explicar el problema.
+    """
     career = selectors.career(career_id)
     membership = institutions_selectors.accepted_membership(teacher, career.institution)
     if membership is None and teacher.role != UserRole.ADMIN:
         raise ValidationError(
             {"career_id": "El docente no forma parte de la institucion de esa carrera."}
+        )
+
+    subject = selectors.subject(subject_id)
+    if subject.career_id != career.id:
+        raise ValidationError(
+            {"subject_id": "La materia no pertenece a la carrera de la cursada."}
         )
 
     if term not in CourseTerm.values:
@@ -47,6 +92,7 @@ def create_course(teacher, *, career_id, name, year, term):
 
     return Course.objects.create(
         career=career,
+        subject=subject,
         teacher=teacher,
         name=name,
         year=year,
