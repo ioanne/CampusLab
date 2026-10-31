@@ -481,13 +481,13 @@ class ProjectFilesAndLinksTests(ProjectScenario):
             headers=self.headers,
         )
         self.assertEqual(response.status_code, 400)
-    
+
+    @override_settings(MAX_IMAGE_SIZE_BYTES=len(PNG_DE_UN_PIXEL) - 1)
     def test_an_image_exceeding_max_size_is_rejected(self):
-        """2. Un archivo que supera el límite de 5 MB debe responder 400."""
-        # Creamos un archivo simulado de 6 MB
+        """2. Un archivo que supera el límite de tamaño debe responder 400."""
         archivo_pesado = SimpleUploadedFile(
             "gigante.png",
-            b"0" * (6 * 1024 * 1024),
+            PNG_DE_UN_PIXEL,
             "image/png",
         )
         response = self.client.post(
@@ -499,8 +499,8 @@ class ProjectFilesAndLinksTests(ProjectScenario):
             headers=self.headers,
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("file", json.dumps(response.json()))
-    
+        self.assertIn("tamaño máximo", json.dumps(response.json(), ensure_ascii=False))
+
     def test_first_uploaded_image_becomes_cover_automatically(self):
         """3. La primera imagen subida queda como portada aunque no se pida explícitamente."""
         response = self.client.post(
@@ -554,8 +554,23 @@ class ProjectFilesAndLinksTests(ProjectScenario):
         saved_name = Path(self.project.assets.get().file.name).name
         self.assertEqual(Path(saved_name).suffix, ".png")
         UUID(Path(saved_name).stem)
-    
 
+    def test_uploaded_image_extension_comes_from_its_real_format(self):
+        image_buffer = BytesIO()
+        Image.new("RGB", (1, 1), color="white").save(image_buffer, format="JPEG")
+        response = self.client.post(
+            f"/api/teacher/projects/{self.project.id}/assets",
+            data={
+                "asset_type": AssetType.IMAGE,
+                "file": SimpleUploadedFile(
+                    "captura.png", image_buffer.getvalue(), "image/png"
+                ),
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Path(self.project.assets.get().file.name).suffix, ".jpg")
 
 
 class ProjectReviewTests(ProjectScenario):

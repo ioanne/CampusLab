@@ -10,6 +10,8 @@ Django: el service no sabe que existe HTTP. Traducirlo a un 400 es tarea de la
 API, con core.errors.validation_error.
 """
 
+from pathlib import Path
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -29,6 +31,9 @@ from apps.projects.models import (
     ProjectTechnology,
 )
 
+IMAGE_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+
+
 def _validate_image(file):
     if file.size > settings.MAX_IMAGE_SIZE_BYTES:
         raise ValidationError(
@@ -44,6 +49,7 @@ def _validate_image(file):
                 raise ValidationError(
                     {"file": "Los formatos permitidos son JPG, PNG y WEBP."}
                 )
+            image_format = image.format
             image.verify()
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
         raise ValidationError(
@@ -51,6 +57,8 @@ def _validate_image(file):
         ) from exc
     finally:
         file.seek(0)
+    return image_format
+
 
 def _students_of_course(course, student_ids):
     """Resuelve los alumnos del proyecto y controla que sean de esa cursada.
@@ -248,7 +256,8 @@ def upload_asset(project, *, asset_type, title, file, is_cover=False):
                     )
                 }
             )
-        _validate_image(file)
+        image_format = _validate_image(file)
+        file.name = f"{Path(file.name).stem}{IMAGE_EXTENSIONS[image_format]}"
         has_cover = project.assets.filter(
             asset_type=AssetType.IMAGE,
             is_cover=True,

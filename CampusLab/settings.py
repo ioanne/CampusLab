@@ -168,7 +168,8 @@ EMAIL_BACKEND = env("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBac
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "no-responder@bancodeproyectos.edu.ar")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-#tamaño máximo de imagenes en MB, por defecto 5MB
+
+# tamaño máximo de imagenes en MB, por defecto 5MB
 MAX_IMAGE_SIZE_MB = int(env("MAX_IMAGE_SIZE_MB", "5"))
 MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
 ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
