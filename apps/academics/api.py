@@ -47,7 +47,6 @@ def ensure_course_of_institution(user, course):
     Es la misma pregunta de arriba, para el otro actor. La hace projects cuando
     la institucion carga un proyecto directo, sin pasar por el docente.
     """
-    
     if user.role == UserRole.ADMIN:
         return
     institution = current_institution(user)
@@ -95,15 +94,6 @@ def create_career(request, payload: CareerIn):
     except ValidationError as exc:
         raise validation_error(exc) from exc
 
-@institution_router.post("/courses/{course_id}/students", response=EnrollmentOut)
-def enroll_students_as_institution(request, course_id: int, payload: EnrollStudentIn):
-    course = selectors.course(course_id)
-    ensure_course_of_institution(request.auth, course)
-    try:
-        return services.enroll_student(course, **payload.model_dump())
-    except ValidationError as exc:
-        raise validation_error(exc) from exc
-
 
 @institution_router.get("/careers/{career_id}/subjects", response=list[SubjectOut])
 def list_career_subjects(request, career_id: int):
@@ -126,12 +116,24 @@ def create_subject(request, career_id: int, payload: SubjectIn):
 def list_institution_courses(request):
     institution = current_institution(request.auth)
     return selectors.courses_of_institution(institution)
-    
+
+
 @institution_router.get("/courses/{course_id}/students", response=list[EnrollmentOut])
 def list_institution_course_students(request, course_id: int):
     course = selectors.course(course_id)
     ensure_course_of_institution(request.auth, course)
     return selectors.enrollments_of_course(course)
+
+
+@institution_router.post("/courses/{course_id}/students", response=EnrollmentOut)
+def enroll_student_as_institution(request, course_id: int, payload: EnrollStudentIn):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    try:
+        return services.enroll_student(course, **payload.model_dump())
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
 
 @institution_router.delete("/courses/{course_id}/students/{enrollment_id}")
 def remove_enrollment_as_institution(request, course_id: int, enrollment_id: int):
@@ -146,6 +148,8 @@ def remove_enrollment_as_institution(request, course_id: int, enrollment_id: int
     except ValidationError as exc:
         raise validation_error(exc) from exc
     return {"success": True}
+
+
 # --------------------------------------------------------------------------
 # Docente
 # --------------------------------------------------------------------------
