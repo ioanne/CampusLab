@@ -37,7 +37,13 @@ from apps.institutions.models import (
     MembershipStatus,
 )
 from apps.projects import selectors, services
-from apps.projects.models import AssetType, LinkType, Project, ProjectStatus
+from apps.projects.models import (
+    AssetType,
+    LinkType,
+    Project,
+    ProjectKind,
+    ProjectStatus,
+)
 from apps.projects.schemas import ProjectFilters
 
 TEST_MEDIA_ROOT = Path(tempfile.mkdtemp(prefix="banco-proyectos-media-"))
@@ -908,6 +914,49 @@ class PublicCatalogTests(ProjectScenario):
         self.assertEqual(
             [p.title for p in selectors.public_catalog(filtros)], ["Museo Virtual"]
         )
+
+
+class ProjectKindTests(ProjectScenario):
+    """Trabajo de clase o trabajo de fin de curso."""
+
+    def _patch_project(self, project, changes):
+        return self.client.patch(
+            f"/api/teacher/projects/{project.id}",
+            data=json.dumps(changes),
+            content_type="application/json",
+            headers=self._headers("diana@docentes.edu.ar"),
+        )
+
+    def test_a_project_is_class_work_by_default(self):
+        body = self._post_project().json()
+        self.assertEqual(body["kind"], ProjectKind.CLASS_WORK)
+        self.assertEqual(body["kind_label"], "Trabajo de clase")
+
+    def test_a_teacher_uploads_a_final_project(self):
+        body = self._post_project(kind=ProjectKind.FINAL_PROJECT).json()
+        self.assertEqual(body["kind"], ProjectKind.FINAL_PROJECT)
+        self.assertEqual(body["kind_label"], "Trabajo de fin de curso")
+
+    def test_an_invalid_kind_is_rejected(self):
+        response = self._post_project(kind="TESIS")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("kind", json.dumps(response.json()))
+        self.assertFalse(Project.objects.exists())
+
+    def test_a_teacher_changes_the_kind(self):
+        project = Project.objects.get(pk=self._post_project().json()["id"])
+        response = self._patch_project(project, {"kind": ProjectKind.FINAL_PROJECT})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["kind"], ProjectKind.FINAL_PROJECT)
+        project.refresh_from_db()
+        self.assertEqual(project.kind, ProjectKind.FINAL_PROJECT)
+
+    def test_an_invalid_kind_is_rejected_on_update(self):
+        project = Project.objects.get(pk=self._post_project().json()["id"])
+        response = self._patch_project(project, {"kind": "TESIS"})
+        self.assertEqual(response.status_code, 400)
+        project.refresh_from_db()
+        self.assertEqual(project.kind, ProjectKind.CLASS_WORK)
 
 
 class ProjectSubjectTests(ProjectScenario):
