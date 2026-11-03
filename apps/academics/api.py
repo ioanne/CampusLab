@@ -16,18 +16,20 @@ from apps.academics.schemas import (
     StudentUpdateIn,
     SubjectIn,
     SubjectOut,
+    InstitutionCourseIn,
 )
 from apps.accounts.models import UserRole
 from apps.accounts.permissions import institution_or_admin, teacher_or_admin
 from apps.institutions.api import current_institution
 from core.errors import validation_error
 
-
 # Lectura publica: las carreras alimentan el filtro del catalogo de proyectos.
 public_router = Router(tags=["Carreras"])
 
 # La institucion administra sus carreras y mira las cursadas de sus docentes.
-institution_router = Router(tags=["Carreras de mi institucion"], auth=institution_or_admin)
+institution_router = Router(
+    tags=["Carreras de mi institucion"], auth=institution_or_admin
+)
 
 # El docente administra sus cursadas y los alumnos de cada una.
 teacher_router = Router(tags=["Cursadas del docente"], auth=teacher_or_admin)
@@ -108,7 +110,6 @@ def list_careers(request, institution_id: int = None, search: str = None):
     return selectors.careers(institution_id=institution_id, search=search)
 
 
-
 # Institucion
 
 
@@ -150,6 +151,20 @@ def list_institution_courses(request):
     return selectors.courses_of_institution(institution)
 
 
+# EQUIPO 3 - HU 04
+@institution_router.post("/courses", response=CourseOut)
+def create_institution_course(request, payload: InstitutionCourseIn):
+    institution = current_institution(request.auth)
+
+    try:
+        return services.create_institution_course(
+            institution,
+            **payload.model_dump(),
+        )
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+
 @institution_router.get("/courses/{course_id}/students", response=list[EnrollmentOut])
 def list_institution_course_students(request, course_id: int):
     course = selectors.course(course_id)
@@ -183,6 +198,7 @@ def remove_enrollment_as_institution(request, course_id: int, enrollment_id: int
 
 
 # Docente
+
 
 @teacher_router.get("/courses", response=list[CourseOut])
 def list_my_courses(request):
@@ -227,7 +243,6 @@ def remove_enrollment(request, course_id: int, enrollment_id: int):
     except ValidationError as exc:
         raise validation_error(exc) from exc
     return {"success": True}
-
 
 
 # Alumnos (docente)
@@ -282,7 +297,9 @@ def institution_update_student(request, student_id: int, payload: StudentUpdateI
         raise validation_error(exc) from exc
 
 
-@institution_students_router.post("/students/{student_id}/links", response=StudentLinkOut)
+@institution_students_router.post(
+    "/students/{student_id}/links", response=StudentLinkOut
+)
 def institution_create_student_link(request, student_id: int, payload: StudentLinkIn):
     """Crea un link para un alumno de su institucion."""
     student = selectors.student(student_id)

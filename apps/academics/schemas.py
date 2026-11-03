@@ -43,6 +43,10 @@ class CourseIn(Schema):
     year: int
     term: str
 
+# EQUIPO 3 - HU 04
+class InstitutionCourseIn(CourseIn):
+    """Datos para que una institucion abra una cursada para un docente."""
+    teacher_id: int
 
 class CourseOut(Schema):
     id: int
@@ -72,6 +76,7 @@ class StudentLinkIn(Schema):
     - title: opcional, por defecto vacio.
     - url: obligatorio, tiene que ser un string (Django valida que sea URL valida mas adelante).
     """
+
     link_type: Literal["LINKEDIN", "GITHUB", "PORTFOLIO", "OTHER"]
     title: str = ""
     url: str
@@ -83,6 +88,7 @@ class StudentLinkOut(Schema):
     No incluimos 'student_id' ni 'created_at' porque el front no los necesita
     para mostrar el link en la ficha del alumno.
     """
+
     id: int
     link_type: str
     title: str
@@ -96,6 +102,7 @@ class StudentUpdateIn(Schema):
     el cliente puede mandar solo el email, o solo el nombre, o todo junto.
     Si un campo no viene, queda como None y el service no lo toca.
     """
+
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[str] = None
