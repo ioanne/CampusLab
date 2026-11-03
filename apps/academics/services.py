@@ -6,6 +6,7 @@ forma parte de ella abre cursadas, y en esas cursadas carga a sus alumnos.
 Las reglas viven aca y no en la API: son verdades del negocio y valen igual si
 manana el alta se hace desde el admin, desde un comando o desde un test.
 """
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
@@ -19,15 +20,19 @@ from apps.academics.models import (
     StudentLink,
     Subject,
 )
-from apps.accounts.models import UserRole
+from apps.accounts.models import User, UserRole
 from apps.institutions import selectors as institutions_selectors
+from django.shortcuts import get_object_or_404
+from ninja.errors import HttpError
 
 
 def create_career(institution, *, name):
     """Alta de una carrera."""
     name = name.strip()
     if Career.objects.of_institution(institution).filter(name__iexact=name).exists():
-        raise ValidationError({"name": "La institucion ya tiene una carrera con ese nombre."})
+        raise ValidationError(
+            {"name": "La institucion ya tiene una carrera con ese nombre."}
+        )
     return Career.objects.create(institution=institution, name=name)
 
 
@@ -42,7 +47,9 @@ def create_subject(career, *, name):
     if not name:
         raise ValidationError({"name": "La materia necesita un nombre."})
     if Subject.objects.of_career(career).filter(name__iexact=name).exists():
-        raise ValidationError({"name": "La carrera ya tiene una materia con ese nombre."})
+        raise ValidationError(
+            {"name": "La carrera ya tiene una materia con ese nombre."}
+        )
     return Subject.objects.create(career=career, name=name)
 
 
@@ -86,6 +93,72 @@ def create_course(teacher, *, career_id, subject_id, name, year, term):
 
     name = name.strip()
     if Course.objects.filter(career=career, year=year, term=term, name=name).exists():
+        raise ValidationError(
+            {"name": "Ya existe esa comision en esa carrera, ano y periodo."}
+        )
+
+    return Course.objects.create(
+        career=career,
+        subject=subject,
+        teacher=teacher,
+        name=name,
+        year=year,
+        term=term,
+    )
+
+
+# EQUIPO 3 - HU 04
+def create_institution_course(
+    institution,
+    *,
+    career_id,
+    subject_id,
+    teacher_id,
+    name,
+    year,
+    term,
+):
+    """Alta de una cursada realizada por una institucion para un docente."""
+    career = selectors.career(career_id)
+
+    if career.institution_id != institution.id:
+        raise HttpError(403, "La carrera pertenece a otra institucion.")
+
+    teacher = get_object_or_404(
+        User,
+        pk=teacher_id,
+        role=UserRole.TEACHER,
+    )
+
+    membership = institutions_selectors.accepted_membership(teacher, institution)
+
+    if membership is None:
+        raise ValidationError(
+            {
+                "teacher_id": "El docente no tiene una membresia aceptada en esta institucion."
+            }
+        )
+
+    subject = selectors.subject(subject_id)
+
+    if subject.career_id != career.id:
+        raise ValidationError(
+            {"subject_id": "La materia no pertenece a la carrera de la cursada."}
+        )
+
+    if term not in CourseTerm.values:
+        raise ValidationError(
+            {"term": f"Periodo invalido. Opciones: {', '.join(CourseTerm.values)}."}
+        )
+
+    name = name.strip()
+
+    if Course.objects.filter(
+        career=career,
+        year=year,
+        term=term,
+        name=name,
+    ).exists():
         raise ValidationError(
             {"name": "Ya existe esa comision en esa carrera, ano y periodo."}
         )
@@ -192,7 +265,9 @@ def enroll_student(course, *, first_name, last_name, email="", links=None):
         )
 
     if CourseStudent.objects.of_course(course).filter(student=student).exists():
-        raise ValidationError({"student": "El alumno ya esta inscripto en esta cursada."})
+        raise ValidationError(
+            {"student": "El alumno ya esta inscripto en esta cursada."}
+        )
 
     existing_urls = set(student.links.values_list("url", flat=True))
     for link_data in links or []:
@@ -207,7 +282,10 @@ def enroll_student(course, *, first_name, last_name, email="", links=None):
 def remove_enrollment(enrollment):
     """Saca a un alumno de una cursada."""
     participations = getattr(enrollment.student, "project_participations", None)
-    if participations is not None and participations.filter(project__course=enrollment.course).exists():
+    if (
+        participations is not None
+        and participations.filter(project__course=enrollment.course).exists()
+    ):
         raise ValidationError(
             {
                 "enrollment_id": (
