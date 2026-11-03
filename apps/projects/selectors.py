@@ -5,6 +5,7 @@ son del queryset, pero "aplicar los filtros que mando el cliente, en este orden,
 sobre estos proyectos" es una decision de lectura y vive aca. La API solo pasa
 los datos que recibio.
 """
+
 from django.shortcuts import get_object_or_404
 
 from apps.projects.models import Project, ProjectAsset, ProjectLink
@@ -59,7 +60,9 @@ def project(project_id):
     es la carrera): asi se resuelven con la misma consulta y no con tres.
     """
     return get_object_or_404(
-        Project.objects.select_related("course__career__institution", "course__teacher"),
+        Project.objects.select_related(
+            "course__career__institution", "course__teacher"
+        ),
         pk=project_id,
     )
 
@@ -104,4 +107,3 @@ def asset(project, asset_id):
 def link(project, link_id):
     """Un link del proyecto, encerrado en el por la misma razon que el archivo."""
     return get_object_or_404(ProjectLink, pk=link_id, project=project)
-

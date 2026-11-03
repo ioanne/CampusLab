@@ -9,6 +9,7 @@ Aca no hay ni un .filter( ni un .create(: leer es tarea de los selectors y
 escribir de los services. Lo unico propio de esta capa es traducir: del HTTP al
 service, y del ValidationError del service al 400 de la respuesta.
 """
+
 from django.core.exceptions import ValidationError
 from ninja import File, Form, Query, Router
 from ninja.errors import HttpError
@@ -34,7 +35,6 @@ from apps.projects.schemas import (
 )
 from core.errors import validation_error
 
-
 # Lectura publica: cualquiera puede ver el catalogo aprobado, sin token.
 public_router = Router(tags=["Catalogo publico"])
 
@@ -42,25 +42,9 @@ public_router = Router(tags=["Catalogo publico"])
 teacher_router = Router(tags=["Proyectos del docente"], auth=teacher_or_admin)
 
 # La institucion carga proyectos en sus cursadas y revisa los que cargan sus docentes.
-institution_router = Router(tags=["Proyectos de mi institucion"], auth=institution_or_admin)
-
-
-def ensure_project_teacher(user, project):
-    """Permiso a nivel de objeto: cada docente toca solo los proyectos de sus
-    cursadas.
-
-    El router ya comprobo que sea docente; esto comprueba que sea EL docente.
-    Se pregunta por la cursada porque es donde vive el dato: el proyecto no
-    guarda a quien lo cargo, guarda en que comision se hizo.
-
-    Vive en la capa de API y no en el service a proposito: es una decision de
-    autorizacion, no una regla del negocio. El comando que carga datos de
-    ejemplo usa los mismos services sin tener ningun usuario autenticado.
-    """
-    if user.role == UserRole.ADMIN:
-        return
-    if project.course.teacher_id != user.id:
-        raise HttpError(403, "El proyecto es de la cursada de otro docente.")
+institution_router = Router(
+    tags=["Proyectos de mi institucion"], auth=institution_or_admin
+)
 
 
 def ensure_project_of_institution(user, project):
@@ -72,9 +56,52 @@ def ensure_project_of_institution(user, project):
     ensure_course_of_institution(user, project.course)
 
 
+def ensure_can_edit_project(user, project):
+    """Permiso a nivel de objeto sobre un proyecto.
+
+    - Admin: puede todo.
+    - Institucion: los proyectos de su institucion.
+    - Docente: los proyectos de sus cursadas.
+    """
+    if user.role == UserRole.ADMIN:
+        return
+    if user.role == UserRole.INSTITUTION:
+        ensure_project_of_institution(user, project)
+        return
+    if project.course.teacher_id != user.id:
+        raise HttpError(403, "El proyecto es de la cursada de otro docente.")
+
+
+@institution_router.get("/projects/{project_id}", response=ProjectOut)
+def get_institution_project(request, project_id: int):
+    """La ficha completa de un proyecto de la institucion, en cualquier estado."""
+    project = selectors.project(project_id)
+    ensure_can_edit_project(request.auth, project)
+    return selectors.full_project(project.pk)
+
+
+@institution_router.patch("/projects/{project_id}", response=ProjectOut)
+def update_institution_project(request, project_id: int, payload: ProjectUpdateIn):
+    """Edita un proyecto de la institucion: queda aprobado y firmado por ella."""
+    project = selectors.project(project_id)
+    ensure_can_edit_project(request.auth, project)
+
+    try:
+        services.update_project(
+            project,
+            changes=payload.model_dump(exclude_unset=True),
+            reviewer=request.auth,
+        )
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+    return selectors.full_project(project.pk)
+
+
 # --------------------------------------------------------------------------
 # Publico
 # --------------------------------------------------------------------------
+
 
 @public_router.get("/projects", response=list[ProjectSummaryOut])
 def list_projects(request, filters: ProjectFilters = Query(...)):
@@ -92,6 +119,7 @@ def get_project(request, slug: str):
 # Docente
 # --------------------------------------------------------------------------
 
+
 @teacher_router.get("/projects", response=list[ProjectSummaryOut])
 def list_my_projects(request, filters: ProjectFilters = Query(...)):
     """Los proyectos de las cursadas del docente, en cualquier estado."""
@@ -108,7 +136,7 @@ def get_my_project(request, project_id: int):
     que no la incluye.
     """
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     return selectors.full_project(project.pk)
 
@@ -135,7 +163,7 @@ def create_project(request, payload: ProjectCreateIn):
 @teacher_router.patch("/projects/{project_id}", response=ProjectOut)
 def update_project(request, project_id: int, payload: ProjectUpdateIn):
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     try:
         # exclude_unset deja solo los campos que el cliente mando de verdad: sin
@@ -162,7 +190,7 @@ def upload_asset(
     parametros se declaran con Form(...) y File(...) en vez de con un schema.
     """
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     try:
         return services.upload_asset(
@@ -179,7 +207,7 @@ def upload_asset(
 @teacher_router.delete("/projects/{project_id}/assets/{asset_id}")
 def delete_asset(request, project_id: int, asset_id: int):
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     services.delete_asset(selectors.asset(project, asset_id))
     return {"success": True}
@@ -189,7 +217,7 @@ def delete_asset(request, project_id: int, asset_id: int):
 def add_link(request, project_id: int, payload: ProjectLinkIn):
     """Suma el repositorio, la demo, el video o lo que el trabajo tenga afuera."""
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     try:
         return services.add_link(project, **payload.model_dump())
@@ -200,7 +228,7 @@ def add_link(request, project_id: int, payload: ProjectLinkIn):
 @teacher_router.delete("/projects/{project_id}/links/{link_id}")
 def delete_link(request, project_id: int, link_id: int):
     project = selectors.project(project_id)
-    ensure_project_teacher(request.auth, project)
+    ensure_can_edit_project(request.auth, project)
 
     services.delete_link(selectors.link(project, link_id))
     return {"success": True}
@@ -209,6 +237,7 @@ def delete_link(request, project_id: int, link_id: int):
 # --------------------------------------------------------------------------
 # Institucion
 # --------------------------------------------------------------------------
+
 
 @institution_router.get("/projects", response=list[ProjectSummaryOut])
 def list_institution_projects(request, status: str = None):

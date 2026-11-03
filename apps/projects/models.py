@@ -9,8 +9,10 @@ Las relaciones se declaran por nombre ("app.Modelo", settings.AUTH_USER_MODEL) y
 no importando la clase: asi las dependencias van en una sola direccion y ninguna
 app necesita saber quien la usa.
 """
+
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -26,6 +28,11 @@ class ProjectStatus(models.TextChoices):
     APPROVED = "APPROVED", "Aprobado"
     CHANGES = "CHANGES", "Con observaciones para corregir"
     REJECTED = "REJECTED", "Rechazado"
+
+
+class ProjectKind(models.TextChoices):
+    CLASS_WORK = "CLASS_WORK", "Trabajo de clase"
+    FINAL_PROJECT = "FINAL_PROJECT", "Trabajo de fin de curso"
 
 
 class AssetType(models.TextChoices):
@@ -54,8 +61,9 @@ def project_asset_upload_to(instance, filename):
     Una carpeta por proyecto y, adentro, una por tipo: asi la carpeta media se
     puede mirar a ojo y se entiende de quien es cada archivo.
     """
-    base_name = Path(filename).name
-    return f"projects/{instance.project.slug}/{instance.asset_type.lower()}/{base_name}"
+    extension = Path(filename).suffix
+    unique_name = f"{uuid4().hex}{extension}"
+    return f"projects/{instance.project.slug}/{instance.asset_type.lower()}/{unique_name}"
 
 
 class Project(models.Model):
@@ -68,14 +76,15 @@ class Project(models.Model):
     equipo de otro es team_name, que es un campo del proyecto y no una tabla
     aparte: el equipo no existe fuera del trabajo que hizo.
 
-    No hay clave foranea a la institucion, a la carrera, al docente ni al ciclo
-    lectivo: TODAS salen de la cursada, y se exponen como properties
-    (institution, career, teacher). No es por escribir menos codigo. Es que el
-    dato existe una sola vez: si el proyecto guardara su propia carrera, nada
-    impediria que apunte a una carrera distinta de la de su cursada, y habria
-    que escribir una validacion para sostener a mano algo que el modelo puede
-    hacer imposible. Los filtros pagan el precio de cruzar la relacion
-    (course__career__institution) y a cambio el dato no puede contradecirse.
+    No hay clave foranea a la institucion, a la carrera, a la materia, al
+    docente ni al ciclo lectivo: TODAS salen de la cursada, y se exponen como
+    properties (institution, career, subject, teacher). No es por escribir menos
+    codigo. Es que el dato existe una sola vez: si el proyecto guardara su
+    propia carrera, nada impediria que apunte a una carrera distinta de la de su
+    cursada, y habria que escribir una validacion para sostener a mano algo que
+    el modelo puede hacer imposible. Los filtros pagan el precio de cruzar la
+    relacion (course__career__institution) y a cambio el dato no puede
+    contradecirse.
 
     Nace pendiente: recien cuando la institucion lo aprueba aparece en el
     catalogo publico.
@@ -108,7 +117,13 @@ class Project(models.Model):
     repository_url = models.URLField(
         blank=True,
         verbose_name="repositorio",
-        help_text="El repositorio de GitHub del trabajo.",
+        help_text="El repositorio del trabajo (GitHub, GitLab o Bitbucket).",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=ProjectKind.choices,
+        default=ProjectKind.CLASS_WORK,
+        verbose_name="tipo",
     )
     status = models.CharField(
         max_length=10,
@@ -129,7 +144,9 @@ class Project(models.Model):
         verbose_name="devolucion de la revision",
         help_text="Lo que la institucion le responde al docente: que falta o por que se rechaza.",
     )
-    reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name="fecha de revision")
+    reviewed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="fecha de revision"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -149,6 +166,12 @@ class Project(models.Model):
         return self.course.career
 
     @property
+    def subject(self):
+        """La materia tambien es la de la cursada: el proyecto no la guarda,
+        igual que la carrera, la institucion y el docente."""
+        return self.course.subject
+
+    @property
     def institution(self):
         """Dos saltos, cursada y carrera, para llegar a la institucion.
 
@@ -159,52 +182,38 @@ class Project(models.Model):
 
     @property
     def teacher(self):
-        #Quien lo cargo es el docente de la cursada, y por eso no hay un campo propio que pueda quedar apuntando a otra persona.
-        
+        """Quien lo cargo es el docente de la cursada, y por eso no hay un campo
+        propio que pueda quedar apuntando a otra persona."""
         return self.course.teacher
 
     @property
     def is_approved(self):
         return self.status == ProjectStatus.APPROVED
 
-  
-
-        #AU 05
     def clean(self):
-        
-        #Lo que se puede comprobar mirando solo este proyecto. Las reglas que necesitan otras tablas (que los alumnos esten inscriptos
-        #en la cursada, por ejemplo) no viven aca: se preguntan en el service, que es el que tiene el panorama completo y la transaccion abierta.    
+        """Lo que se puede comprobar mirando solo este proyecto.
+
+        Las reglas que necesitan otras tablas (que los alumnos esten inscriptos
+        en la cursada, por ejemplo) no viven aca: se preguntan en el service,
+        que es el que tiene el panorama completo y la transaccion abierta.
+        """
         super().clean()
-
         if self.repository_url:
-            # 1. Validar que sea HTTPS (Criterio de aceptación 2)
-            if not self.repository_url.startswith("https://"):
-                raise ValidationError({
-                    "repository_url": "El repositorio debe usar https://."
-                })
-
             parsed = urlparse(self.repository_url)
-            hostname = parsed.hostname or ""  # Evita errores si la URL es rara
-
-            # 2. Traer la lista desde settings (Criterio de aceptación 1)
-            allowed_hosts = getattr(settings, "ALLOWED_REPOSITORY_HOSTS", [])
-
-            # 3. Validar el dominio, permitiendo subdominios (ej: www.github.com)
-            is_valid = any(
-                hostname == allowed or hostname.endswith("." + allowed)
-                for allowed in allowed_hosts
-            )
-
-            # 4. Lanzar error con mensaje claro si falla (Criterio de aceptación 3)
-            if not is_valid:
-                hosts_str = ", ".join(allowed_hosts)
-                raise ValidationError({
-                    "repository_url": f"El repositorio debe pertenecer a uno de los siguientes dominios: {hosts_str}."
-                })
-
-
-
-
+            hostname = (parsed.hostname or "").removeprefix("www.")
+            if (
+                parsed.scheme != "https"
+                or hostname not in settings.ALLOWED_REPOSITORY_HOSTS
+            ):
+                allowed_hosts = ", ".join(settings.ALLOWED_REPOSITORY_HOSTS)
+                raise ValidationError(
+                    {
+                        "repository_url": (
+                            "El repositorio tiene que ser un link https:// de "
+                            f"alguno de estos dominios: {allowed_hosts}."
+                        )
+                    }
+                )
 
     def review(self, status, *, reviewer=None, notes="", save=True):
         """Guarda la decision de la revision: que se resolvio, quien y cuando.
@@ -217,7 +226,9 @@ class Project(models.Model):
         self.review_notes = notes
         self.reviewed_at = timezone.now()
         if save:
-            self.save(update_fields=["status", "reviewed_by", "review_notes", "reviewed_at"])
+            self.save(
+                update_fields=["status", "reviewed_by", "review_notes", "reviewed_at"]
+            )
         return self
 
     def _build_unique_slug(self):
@@ -418,4 +429,3 @@ class ProjectLink(models.Model):
 
     def __str__(self):
         return self.title or self.url
-

@@ -1,3 +1,6 @@
+from django.test import TestCase
+
+# Create your tests here.
 import json
 
 from django.contrib.auth import get_user_model
@@ -201,4 +204,3 @@ class AccountsApiTests(TestCase):
     def test_me_requires_token(self):
         response = self.client.get("/api/auth/me")
         self.assertEqual(response.status_code, 401)
-

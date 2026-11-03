@@ -9,8 +9,13 @@ Cuando algo no cumple una regla, la funcion levanta un ValidationError de
 Django: el service no sabe que existe HTTP. Traducirlo a un 400 es tarea de la
 API, con core.errors.validation_error.
 """
+
+from pathlib import Path
+
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from PIL import Image
 
 from apps.academics import selectors as academics_selectors
 from apps.catalogs import selectors as catalogs_selectors
@@ -20,11 +25,40 @@ from apps.projects.models import (
     LinkType,
     Project,
     ProjectAsset,
+    ProjectKind,
     ProjectLink,
     ProjectStatus,
     ProjectStudent,
     ProjectTechnology,
 )
+
+IMAGE_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+
+
+def _validate_image(file):
+    if file.size > settings.MAX_IMAGE_SIZE_BYTES:
+        raise ValidationError(
+            {
+                "file": f"La imagen supera el tamaño máximo permitido de {settings.MAX_IMAGE_SIZE_MB} MB."
+            }
+        )
+
+    try:
+        file.seek(0)
+        with Image.open(file) as image:
+            if image.format not in settings.ALLOWED_IMAGE_FORMATS:
+                raise ValidationError(
+                    {"file": "Los formatos permitidos son JPG, PNG y WEBP."}
+                )
+            image_format = image.format
+            image.verify()
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
+        raise ValidationError(
+            {"file": "El archivo no contiene una imagen valida o esta danada."}
+        ) from exc
+    finally:
+        file.seek(0)
+    return image_format
 
 
 def _students_of_course(course, student_ids):
@@ -43,7 +77,9 @@ def _students_of_course(course, student_ids):
     students = list(academics_selectors.students_enrolled_in_course(course, ids))
     if len(students) != len(ids):
         raise ValidationError(
-            {"student_ids": "Algun alumno no esta inscripto en la cursada del proyecto."}
+            {
+                "student_ids": "Algun alumno no esta inscripto en la cursada del proyecto."
+            }
         )
     return students
 
@@ -95,6 +131,11 @@ def _initial_status(course):
     return ProjectStatus.APPROVED if trusted else ProjectStatus.PENDING
 
 
+def _validate_kind(kind):
+    if kind not in ProjectKind.values:
+        raise ValidationError({"kind": "El tipo de proyecto no es valido."})
+
+
 @transaction.atomic
 def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **data):
     """Carga un proyecto de una cursada: todo junto o nada.
@@ -115,6 +156,7 @@ def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **d
     aprobado y con la revision firmada por quien lo cargo: la institucion es la
     que revisa, y no tiene sentido que se apruebe a si misma.
     """
+    _validate_kind(data.get("kind", ProjectKind.CLASS_WORK))
     course = academics_selectors.course(course_id)
     students = _students_of_course(course, student_ids)
 
@@ -128,33 +170,24 @@ def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **d
 
 
 @transaction.atomic
-def update_project(project, *, changes):
-    """Aplica solo lo que vino y vuelve el proyecto a la cola de revision.
-
-    Editar un proyecto lo devuelve a PENDING: lo que esta publicado tiene que
-    ser siempre una version que la institucion vio. Se limpian quien reviso y
-    cuando, porque esa revision ya no corresponde a este texto. Al docente con
-    privilegio no lo devuelve a la cola, por el mismo motivo por el que no lo
-    hizo al crearlo: su edicion tambien sale publicada.
-
-    La devolucion escrita (review_notes), en cambio, NO se borra: el docente la
-    sigue teniendo a la vista mientras corrige, que es justamente para lo que se
-    la escribieron. Se reemplaza sola en la proxima revision.
-
-    La cursada no esta entre los campos editables. Cambiarla cambiaria de golpe
-    la institucion, la carrera y el docente del proyecto, y dejaria adentro
-    alumnos de otra comision: si un trabajo se cargo en la cursada equivocada,
-    se carga de nuevo donde va.
+def update_project(project, *, changes, reviewer=None):
+    """
+    `reviewer` es la institucion, cuando es ella la que edita. Su edicion no vuelve a PENDING: queda aprobada y firmada por ella, igual que cuando carga.
     """
     technology_ids = changes.pop("technology_ids", None)
     student_ids = changes.pop("student_ids", None)
+    if "kind" in changes:
+        _validate_kind(changes["kind"])
 
     for field, value in changes.items():
         setattr(project, field, value)
 
-    project.status = _initial_status(project.course)
-    project.reviewed_by = None
-    project.reviewed_at = None
+    if reviewer is not None:
+        project.review(ProjectStatus.APPROVED, reviewer=reviewer, save=False)
+    else:
+        project.status = _initial_status(project.course)
+        project.reviewed_by = None
+        project.reviewed_at = None
     project.save()
 
     if technology_ids is not None:
@@ -173,11 +206,19 @@ def review_project(project, *, status, reviewer=None, notes=""):
     devolucion es obligatoria: sin decir que falta, el trabajo no se puede
     corregir.
     """
-    if status not in {ProjectStatus.APPROVED, ProjectStatus.CHANGES, ProjectStatus.REJECTED}:
-        raise ValidationError({"status": "Estado invalido: se aprueba, se devuelve o se rechaza."})
+    if status not in {
+        ProjectStatus.APPROVED,
+        ProjectStatus.CHANGES,
+        ProjectStatus.REJECTED,
+    }:
+        raise ValidationError(
+            {"status": "Estado invalido: se aprueba, se devuelve o se rechaza."}
+        )
     if status != ProjectStatus.APPROVED and not notes.strip():
         raise ValidationError(
-            {"notes": "Para devolver o rechazar un proyecto hay que escribir la devolucion."}
+            {
+                "notes": "Para devolver o rechazar un proyecto hay que escribir la devolucion."
+            }
         )
 
     return project.review(status, reviewer=reviewer, notes=notes)
@@ -197,17 +238,36 @@ def upload_asset(project, *, asset_type, title, file, is_cover=False):
     """
     if asset_type not in AssetType.values:
         raise ValidationError(
-            {"asset_type": f"Tipo de archivo invalido. Opciones: {', '.join(AssetType.values)}."}
+            {
+                "asset_type": f"Tipo de archivo invalido. Opciones: {', '.join(AssetType.values)}."
+            }
         )
 
-    content_type = getattr(file, "content_type", "") or ""
-    if asset_type == AssetType.IMAGE and not content_type.startswith("image/"):
-        raise ValidationError({"file": "Para IMAGE se espera un archivo de imagen."})
-    if asset_type == AssetType.DOCUMENT and not content_type.startswith(("application/", "text/")):
-        raise ValidationError({"file": "Para DOCUMENT se espera un documento."})
-
-    if is_cover:
-        project.assets.filter(is_cover=True).update(is_cover=False)
+    if asset_type == AssetType.IMAGE:
+        image_count = project.assets.filter(asset_type=AssetType.IMAGE).count()
+        if image_count >= settings.MAX_IMAGES_PER_PROJECT:
+            raise ValidationError(
+                {
+                    "file": (
+                        "El proyecto ya alcanzó el máximo de "
+                        f"{settings.MAX_IMAGES_PER_PROJECT} imágenes."
+                    )
+                }
+            )
+        image_format = _validate_image(file)
+        file.name = f"{Path(file.name).stem}{IMAGE_EXTENSIONS[image_format]}"
+        has_cover = project.assets.filter(
+            asset_type=AssetType.IMAGE,
+            is_cover=True,
+        ).exists()
+        if is_cover or not has_cover:
+            project.assets.filter(is_cover=True).update(is_cover=False)
+            is_cover = True
+    else:
+        content_type = getattr(file, "content_type", "") or ""
+        if not content_type.startswith(("application/", "text/")):
+            raise ValidationError({"file": "Para DOCUMENT se espera un documento."})
+        is_cover = False
 
     return ProjectAsset.objects.create(
         project=project,
@@ -237,7 +297,9 @@ def add_link(project, *, link_type, title, url):
     """
     if link_type not in LinkType.values:
         raise ValidationError(
-            {"link_type": f"Tipo de link invalido. Opciones: {', '.join(LinkType.values)}."}
+            {
+                "link_type": f"Tipo de link invalido. Opciones: {', '.join(LinkType.values)}."
+            }
         )
     if project.links.filter(url=url).exists():
         raise ValidationError({"url": "Ese link ya esta cargado en el proyecto."})

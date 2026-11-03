@@ -4,6 +4,7 @@ Los schemas de salida reusan los de las otras apps en vez de repetir sus campos:
 si manana la institucion suma un dato, aparece solo. Es la misma direccion de
 dependencia que en los modelos: proyectos conoce a las demas y no al reves.
 """
+
 from datetime import datetime
 from typing import Optional
 
@@ -12,6 +13,7 @@ from ninja import Schema
 from apps.academics.schemas import CareerOut, CourseOut
 from apps.catalogs.schemas import TechnologyOut
 from apps.institutions.schemas import InstitutionOut
+from apps.projects.models import ProjectKind
 
 
 class ProjectFilters(Schema):
@@ -49,6 +51,7 @@ class ProjectCreateIn(Schema):
     technology_ids: list[int] = []
     # Ids de alumnos de academics. Tienen que estar inscriptos en la cursada.
     student_ids: list[int] = []
+    kind: str = ProjectKind.CLASS_WORK
 
 
 class ProjectUpdateIn(Schema):
@@ -65,6 +68,7 @@ class ProjectUpdateIn(Schema):
     repository_url: Optional[str] = None
     technology_ids: Optional[list[int]] = None
     student_ids: Optional[list[int]] = None
+    kind: Optional[str] = None
 
 
 class ProjectReviewIn(Schema):
@@ -169,10 +173,16 @@ class ProjectSummaryOut(Schema):
     year: int
     technologies: list[TechnologyOut]
     cover_url: Optional[str] = None
+    kind: str
+    kind_label: str
 
     @staticmethod
     def resolve_status_label(obj):
         return obj.get_status_display()
+
+    @staticmethod
+    def resolve_kind_label(obj):
+        return obj.get_kind_display()
 
     @staticmethod
     def resolve_institution_name(obj):
@@ -235,6 +245,8 @@ class ProjectOut(Schema):
     reviewed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    kind: str
+    kind_label: str
 
     # Los campos que no salen tal cual del modelo se resuelven aca. Asi la forma
     # de la respuesta se declara en un solo lugar y los endpoints devuelven el
@@ -242,6 +254,10 @@ class ProjectOut(Schema):
     @staticmethod
     def resolve_status_label(obj):
         return obj.get_status_display()
+
+    @staticmethod
+    def resolve_kind_label(obj):
+        return obj.get_kind_display()
 
     @staticmethod
     def resolve_teacher_name(obj):

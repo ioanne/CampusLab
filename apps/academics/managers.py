@@ -3,6 +3,7 @@
 Cada filtro es una pregunta escrita una sola vez. Los selectors los combinan y
 asi nadie vuelve a escribir a mano el camino career__institution.
 """
+
 from django.db import models
 
 
@@ -17,6 +18,16 @@ class CareerQuerySet(models.QuerySet):
 
     def with_institution(self):
         return self.select_related("institution")
+
+
+class SubjectQuerySet(models.QuerySet):
+    """Filtros de materias."""
+
+    def of_career(self, career):
+        return self.filter(career=career)
+
+    def with_career(self):
+        return self.select_related("career__institution")
 
 
 class CourseQuerySet(models.QuerySet):
@@ -34,7 +45,7 @@ class CourseQuerySet(models.QuerySet):
         return self.filter(career__institution=institution)
 
     def with_related(self):
-        return self.select_related("career__institution", "teacher")
+        return self.select_related("career__institution", "subject", "teacher")
 
 
 class StudentQuerySet(models.QuerySet):
@@ -60,3 +71,6 @@ class CourseStudentQuerySet(models.QuerySet):
 
     def with_student(self):
         return self.select_related("student")
+
+    def with_student_links(self):
+        return self.with_student().prefetch_related("student__links")

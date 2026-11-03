@@ -4,6 +4,7 @@ El admin es la puerta de servicio: sirve para mirar y arreglar datos, no para
 reemplazar a la API. Por eso lo unico que se configura aca es lo que hace falta
 para encontrar un proyecto y ver sus tablas relacionadas.
 """
+
 from django.contrib import admin
 
 from apps.projects.models import (
@@ -39,7 +40,15 @@ class ProjectLinkInline(admin.TabularInline):
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ["title", "team_name", "course", "institution", "status", "created_at"]
+    list_display = [
+        "title",
+        "team_name",
+        "course",
+        "institution",
+        "kind",
+        "status",
+        "created_at",
+    ]
     # Buscar por alumno, por carrera o por institucion cruza tablas, y en casi
     # todos los casos cruza tambien de app: eso es lo que hace el doble guion
     # bajo, seguir la relacion hasta el campo del otro modelo. Como el proyecto
@@ -53,7 +62,13 @@ class ProjectAdmin(admin.ModelAdmin):
         "students__student__first_name",
         "students__student__last_name",
     ]
-    list_filter = ["status", "course__year", "course__term", "course__career__institution"]
+    list_filter = [
+        "status",
+        "kind",
+        "course__year",
+        "course__term",
+        "course__career__institution",
+    ]
     prepopulated_fields = {"slug": ("title",)}
     inlines = [
         ProjectStudentInline,
@@ -81,6 +96,3 @@ class ProjectLinkAdmin(admin.ModelAdmin):
     list_display = ["project", "link_type", "title", "url", "created_at"]
     search_fields = ["project__title", "title", "url"]
     list_filter = ["link_type"]
-
-
-

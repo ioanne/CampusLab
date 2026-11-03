@@ -178,4 +178,3 @@ class InstitutionTeacher(models.Model):
         if save:
             self.save(update_fields=["publishes_without_review"])
         return self
-
