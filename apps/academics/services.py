@@ -21,6 +21,7 @@ from apps.academics.models import (
 )
 from apps.accounts.models import UserRole
 from apps.institutions import selectors as institutions_selectors
+from core.validators import ensure_choice
 
 
 def create_career(institution, *, name):
@@ -79,10 +80,12 @@ def create_course(teacher, *, career_id, subject_id, name, year, term):
             {"subject_id": "La materia no pertenece a la carrera de la cursada."}
         )
 
-    if term not in CourseTerm.values:
-        raise ValidationError(
-            {"term": f"Periodo invalido. Opciones: {', '.join(CourseTerm.values)}."}
-        )
+    ensure_choice(
+        "term",
+        term,
+        CourseTerm,
+        f"Periodo invalido. Opciones: {', '.join(CourseTerm.values)}.",
+    )
 
     name = name.strip()
     if Course.objects.filter(career=career, year=year, term=term, name=name).exists():

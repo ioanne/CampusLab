@@ -19,19 +19,29 @@ from apps.projects.models import ProjectKind
 class ProjectFilters(Schema):
     """Filtros del catalogo. Todos son opcionales y se combinan entre si.
 
-    institution_id, career_id, course_id y year no son campos del proyecto: son
-    datos de la cursada, y por eso el queryset los busca cruzando la relacion.
-    Para el que consulta la API eso es invisible, que es como tiene que ser.
+    institution_id, institution, career_id, course_id, subject_id, teacher_id,
+    teacher, year y term no son campos del proyecto: son datos de la cursada, y
+    por eso el queryset los busca cruzando la relacion. Para el que consulta la
+    API eso es invisible, que es como tiene que ser.
+
+    kind y term llegan como texto y no como enum: un valor invalido lo rechaza
+    el selector con un 400, en vez del 422 que devolveria Ninja.
     """
 
     search: Optional[str] = None
     student: Optional[str] = None
+    team: Optional[str] = None
     institution_id: Optional[int] = None
+    institution: Optional[str] = None
     career_id: Optional[int] = None
     course_id: Optional[int] = None
-    technology_id: Optional[int] = None
+    subject_id: Optional[int] = None
+    teacher_id: Optional[int] = None
+    teacher: Optional[str] = None
+    technology_id: list[int] = []
     year: Optional[int] = None
-    team: Optional[str] = None
+    term: Optional[str] = None
+    kind: Optional[str] = None
 
 
 class ProjectCreateIn(Schema):
