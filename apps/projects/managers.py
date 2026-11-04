@@ -4,10 +4,12 @@ from django.db import models
 
 
 def _name_matches(path, text):
-    # Nombre o apellido de la persona a la que se llega por path.
-    return models.Q(**{f"{path}__first_name__icontains": text}) | models.Q(
-        **{f"{path}__last_name__icontains": text}
-    )
+    condition = models.Q()
+    for word in text.split():
+        condition &= models.Q(**{f"{path}__first_name__icontains": word}) | models.Q(
+            **{f"{path}__last_name__icontains": word}
+        )
+    return condition
 
 
 class ProjectQuerySet(models.QuerySet):

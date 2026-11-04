@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 from ninja import Schema
+from pydantic import field_validator
 
 from apps.academics.schemas import CareerOut, CourseOut
 from apps.catalogs.schemas import TechnologyOut
@@ -23,9 +24,6 @@ class ProjectFilters(Schema):
     teacher, year y term no son campos del proyecto: son datos de la cursada, y
     por eso el queryset los busca cruzando la relacion. Para el que consulta la
     API eso es invisible, que es como tiene que ser.
-
-    kind y term llegan como texto y no como enum: un valor invalido lo rechaza
-    el selector con un 400, en vez del 422 que devolveria Ninja.
     """
 
     search: Optional[str] = None
@@ -42,6 +40,11 @@ class ProjectFilters(Schema):
     year: Optional[int] = None
     term: Optional[str] = None
     kind: Optional[str] = None
+
+    @field_validator("kind", "term")
+    @classmethod
+    def _to_upper(cls, value):
+        return value.upper() if value else value
 
 
 class ProjectCreateIn(Schema):
