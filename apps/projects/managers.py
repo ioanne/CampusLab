@@ -2,6 +2,24 @@
 
 from django.db import models
 
+# Donde mira search: los datos del proyecto y los de su cursada. Los de la
+# cursada se leen cruzando la relacion, igual que los filtros de abajo, porque
+# el proyecto no los guarda.
+SEARCH_FIELDS = (
+    "title",
+    "summary",
+    "description",
+    "team_name",
+    "students__student__first_name",
+    "students__student__last_name",
+    "course__teacher__first_name",
+    "course__teacher__last_name",
+    "course__subject__name",
+    "course__career__name",
+    "course__career__institution__name",
+    "technologies__technology__name",
+)
+
 
 class ProjectQuerySet(models.QuerySet):
     """Cada metodo hace una sola cosa y devuelve otro queryset, asi se encadenan:
@@ -34,9 +52,39 @@ class ProjectQuerySet(models.QuerySet):
         return self.filter(course_id=course_id)
 
     def search(self, text):
-        return self.filter(
-            models.Q(title__icontains=text) | models.Q(summary__icontains=text)
-        )
+        """Cada palabra tiene que aparecer en algun campo: AND entre palabras,
+        OR entre campos. "ana django" deja los proyectos que tienen una Ana en
+        algun lado y que ademas usan Django.
+
+        Cada palabra se busca por separado y no todas juntas en un solo
+        filter(). Dentro de un mismo filter(), las condiciones sobre una
+        relacion de a muchos se cumplen en la MISMA fila: "gomez diaz" pediria
+        un alumno que se llame Gomez y Diaz a la vez. Por separado, cada palabra
+        cruza la relacion por su cuenta y puede caer en un integrante distinto.
+
+        Y cada palabra va en su propia subconsulta (pk__in), no en un filter()
+        encadenado. Encadenados, cada filter() suma sus propios joins a alumnos
+        y tecnologias en la misma consulta: las filas se multiplican con cada
+        palabra y con 15 palabras SQLite se queda sin joins (admite 64). Con la
+        subconsulta, los cruces son de una palabra por vez y la consulta de
+        afuera no cruza ninguna relacion de a muchos.
+
+        icontains en SQLite ignora mayusculas solo en las letras ASCII: "MUSEO"
+        encuentra "Museo", pero una vocal con tilde o una enie en mayuscula no
+        encuentra la misma letra en minuscula. Ignorar acentos queda para
+        cuando se pase a PostgreSQL.
+        """
+        queryset = self
+        for word in text.split():
+            matches_word = models.Q()
+            for field in SEARCH_FIELDS:
+                matches_word |= models.Q(**{f"{field}__icontains": word})
+            projects_with_word = self.model.objects.filter(matches_word).values("pk")
+            queryset = queryset.filter(pk__in=projects_with_word)
+        # Con las subconsultas ya no salen repetidos, porque la consulta de
+        # afuera no cruza alumnos ni tecnologias. El distinct() lo deja
+        # asegurado aunque mas adelante se sume un filtro que si los cruce.
+        return queryset.distinct()
 
     def with_student(self, name):
         # Cruza una relacion de a muchos: sin distinct(), un proyecto de equipo
