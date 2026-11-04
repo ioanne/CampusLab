@@ -21,6 +21,14 @@ SEARCH_FIELDS = (
 )
 
 
+def _matches_word(word):
+    """Un OR de icontains: la palabra aparece en alguno de los campos."""
+    condition = models.Q()
+    for field in SEARCH_FIELDS:
+        condition |= models.Q(**{f"{field}__icontains": word})
+    return condition
+
+
 class ProjectQuerySet(models.QuerySet):
     """Cada metodo hace una sola cosa y devuelve otro queryset, asi se encadenan:
     Project.objects.approved().of_year(2026).with_student("ana").
@@ -76,10 +84,9 @@ class ProjectQuerySet(models.QuerySet):
         """
         queryset = self
         for word in text.split():
-            matches_word = models.Q()
-            for field in SEARCH_FIELDS:
-                matches_word |= models.Q(**{f"{field}__icontains": word})
-            projects_with_word = self.model.objects.filter(matches_word).values("pk")
+            projects_with_word = self.model._default_manager.filter(
+                _matches_word(word)
+            ).values("pk")
             queryset = queryset.filter(pk__in=projects_with_word)
         # Con las subconsultas ya no salen repetidos, porque la consulta de
         # afuera no cruza alumnos ni tecnologias. El distinct() lo deja
