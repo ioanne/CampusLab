@@ -8,7 +8,16 @@ los datos que recibio.
 
 from django.shortcuts import get_object_or_404
 
-from apps.projects.models import Project, ProjectAsset, ProjectLink
+from apps.academics.models import CourseTerm
+from apps.projects.models import Project, ProjectAsset, ProjectKind, ProjectLink
+from core.validators import ensure_choice
+
+
+def _validate_filters(filters):
+    if filters.kind:
+        ensure_choice("kind", filters.kind, ProjectKind)
+    if filters.term:
+        ensure_choice("term", filters.term, CourseTerm)
 
 
 def _apply_filters(queryset, filters):
@@ -18,6 +27,7 @@ def _apply_filters(queryset, filters):
     combinan solos y con AND: pedir tecnologia y anio deja los proyectos que
     cumplen las dos cosas, sin escribir una consulta por combinacion posible.
     """
+    _validate_filters(filters)
     if filters.search:
         queryset = queryset.search(filters.search)
     if filters.student:
@@ -34,6 +44,18 @@ def _apply_filters(queryset, filters):
         queryset = queryset.with_technology(filters.technology_id)
     if filters.year:
         queryset = queryset.of_year(filters.year)
+    if filters.institution:
+        queryset = queryset.with_institution_name(filters.institution)
+    if filters.subject_id:
+        queryset = queryset.of_subject(filters.subject_id)
+    if filters.teacher_id:
+        queryset = queryset.of_teacher(filters.teacher_id)
+    if filters.teacher:
+        queryset = queryset.with_teacher_name(filters.teacher)
+    if filters.term:
+        queryset = queryset.of_term(filters.term)
+    if filters.kind:
+        queryset = queryset.of_kind(filters.kind)
     return queryset
 
 

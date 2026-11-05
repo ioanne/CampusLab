@@ -106,7 +106,10 @@ def update_institution_project(request, project_id: int, payload: ProjectUpdateI
 @public_router.get("/projects", response=list[ProjectSummaryOut])
 def list_projects(request, filters: ProjectFilters = Query(...)):
     """El catalogo: solo lo aprobado, con los filtros que hayan venido."""
-    return selectors.public_catalog(filters)
+    try:
+        return selectors.public_catalog(filters)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
 
 
 @public_router.get("/projects/{slug}", response=ProjectOut)
@@ -123,7 +126,10 @@ def get_project(request, slug: str):
 @teacher_router.get("/projects", response=list[ProjectSummaryOut])
 def list_my_projects(request, filters: ProjectFilters = Query(...)):
     """Los proyectos de las cursadas del docente, en cualquier estado."""
-    return selectors.projects_of_teacher(request.auth, filters)
+    try:
+        return selectors.projects_of_teacher(request.auth, filters)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
 
 
 @teacher_router.get("/projects/{project_id}", response=ProjectOut)

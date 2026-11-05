@@ -987,6 +987,63 @@ class PublicCatalogTests(ProjectScenario):
         )
 
 
+class CatalogFiltersTests(ProjectScenario):
+    def setUp(self):
+        super().setUp()
+        career = Career.objects.create(institution=self.other_institution, name="Software")
+        self.back_end = Subject.objects.create(career=career, name="Back End")
+        course = Course.objects.create(
+            career=career,
+            subject=self.back_end,
+            teacher=self.other_teacher,
+            name="Noche",
+            year=2025,
+            term=CourseTerm.SECOND,
+        )
+        self.museo = self._create_project(title="Museo", students=[])
+        services.replace_technologies(self.museo, [self.technology.id])
+        self.final = self._create_project(
+            course=course, title="Final", kind=ProjectKind.FINAL_PROJECT, students=[]
+        )
+        services.replace_technologies(self.final, [self.other_technology.id])
+        self._create_project(course=course, title="Clase", students=[])
+
+    def _titles(self, query):
+        response = self.client.get(f"/api/projects?{query}")
+        self.assertEqual(response.status_code, 200)
+        return sorted(p["title"] for p in response.json())
+
+    def test_teacher_id(self):
+        self.assertEqual(self._titles(f"teacher_id={self.teacher.id}"), ["Museo"])
+
+    def test_teacher_by_full_name(self):
+        self.assertEqual(self._titles("teacher=hugo perez"), ["Clase", "Final"])
+
+    def test_subject_id(self):
+        self.assertEqual(self._titles(f"subject_id={self.subject.id}"), ["Museo"])
+
+    def test_kind(self):
+        self.assertEqual(self._titles("kind=final_project"), ["Final"])
+
+    def test_term(self):
+        self.assertEqual(self._titles("term=FIRST"), ["Museo"])
+
+    def test_institution_by_name(self):
+        self.assertEqual(self._titles("institution=ifts 24"), ["Clase", "Final"])
+
+    def test_technology_id_accepts_several(self):
+        query = f"technology_id={self.technology.id}&technology_id={self.other_technology.id}"
+        self.assertEqual(self._titles(query), ["Final", "Museo"])
+
+    def test_invalid_kind_or_term_is_400(self):
+        self.assertEqual(self.client.get("/api/projects?kind=XX").status_code, 400)
+        self.assertEqual(self.client.get("/api/projects?term=XX").status_code, 400)
+
+    def test_institution_year_kind_and_subject_combine(self):
+        query = f"institution=ifts 24&year=2025&kind=FINAL_PROJECT&subject_id={self.back_end.id}"
+        self.assertEqual(self._titles(query), ["Final"])
+
+
 class ProjectKindTests(ProjectScenario):
     """Trabajo de clase o trabajo de fin de curso."""
 

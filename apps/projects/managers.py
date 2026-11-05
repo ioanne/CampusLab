@@ -3,6 +3,15 @@
 from django.db import models
 
 
+def _name_matches(path, text):
+    condition = models.Q()
+    for word in text.split():
+        condition &= models.Q(**{f"{path}__first_name__icontains": word}) | models.Q(
+            **{f"{path}__last_name__icontains": word}
+        )
+    return condition
+
+
 class ProjectQuerySet(models.QuerySet):
     """Cada metodo hace una sola cosa y devuelve otro queryset, asi se encadenan:
     Project.objects.approved().of_year(2026).with_student("ana").
@@ -41,24 +50,36 @@ class ProjectQuerySet(models.QuerySet):
     def with_student(self, name):
         # Cruza una relacion de a muchos: sin distinct(), un proyecto de equipo
         # aparece una vez por cada alumno que coincide.
-        return self.filter(
-            models.Q(students__student__first_name__icontains=name)
-            | models.Q(students__student__last_name__icontains=name)
-        ).distinct()
+        return self.filter(_name_matches("students__student", name)).distinct()
 
-    def with_technology(self, technology_id):
+    def with_teacher_name(self, text):
+        return self.filter(_name_matches("course__teacher", text))
+
+    def with_technology(self, technology_ids):
         # technologies son las filas de la tabla del medio, asi que el filtro
         # cruza dos relaciones: de proyecto a ProjectTechnology y de ahi a la
-        # tecnologia.
-        return self.filter(technologies__technology_id=technology_id).distinct()
+        # tecnologia. Con varios ids alcanza con que use cualquiera de ellos.
+        return self.filter(technologies__technology_id__in=technology_ids).distinct()
 
     def of_institution(self, institution):
         # Acepta la institucion o su id: la bandeja pasa el objeto que ya tiene
         # y el catalogo publico, el id que vino en la URL.
         return self.filter(course__career__institution=institution)
 
+    def with_institution_name(self, text):
+        return self.filter(course__career__institution__name__icontains=text)
+
     def of_career(self, career_id):
         return self.filter(course__career_id=career_id)
+
+    def of_subject(self, subject_id):
+        return self.filter(course__subject_id=subject_id)
+
+    def of_term(self, term):
+        return self.filter(course__term=term)
+
+    def of_kind(self, kind):
+        return self.filter(kind=kind)
 
     def of_year(self, year):
         # El ciclo lectivo es un campo de la cursada: no hay catalogo de anios
