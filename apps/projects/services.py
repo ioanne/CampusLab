@@ -169,6 +169,16 @@ def create_project(*, course_id, student_ids, technology_ids, reviewer=None, **d
     return project
 
 
+def _resubmit(project, reviewer):
+    """Editar contenido vuelve a revision, salvo que edite la institucion; no guarda."""
+    if reviewer is not None:
+        project.review(ProjectStatus.APPROVED, reviewer=reviewer, save=False)
+    else:
+        project.status = _initial_status(project.course)
+        project.reviewed_by = None
+        project.reviewed_at = None
+
+
 @transaction.atomic
 def update_project(project, *, changes, reviewer=None):
     """
@@ -182,12 +192,7 @@ def update_project(project, *, changes, reviewer=None):
     for field, value in changes.items():
         setattr(project, field, value)
 
-    if reviewer is not None:
-        project.review(ProjectStatus.APPROVED, reviewer=reviewer, save=False)
-    else:
-        project.status = _initial_status(project.course)
-        project.reviewed_by = None
-        project.reviewed_at = None
+    _resubmit(project, reviewer)
     project.save()
 
     if technology_ids is not None:
@@ -261,7 +266,7 @@ def upload_asset(project, *, asset_type, title, file, is_cover=False):
             is_cover=True,
         ).exists()
         if is_cover or not has_cover:
-            project.assets.filter(is_cover=True).update(is_cover=False)
+            _unmark_cover(project)
             is_cover = True
     else:
         content_type = getattr(file, "content_type", "") or ""
@@ -278,14 +283,59 @@ def upload_asset(project, *, asset_type, title, file, is_cover=False):
     )
 
 
-def delete_asset(asset):
-    """Borra el archivo del disco y despues la fila.
+def _unmark_cover(project):
+    project.assets.filter(is_cover=True).update(is_cover=False)
 
-    En ese orden: si se borrara primero la fila, nadie sabria despues que
-    archivo de la carpeta media hay que borrar y quedaria basura para siempre.
-    """
+
+def _mark_as_cover(asset):
+    """Deja a esta imagen como la unica portada del proyecto."""
+    _unmark_cover(asset.project)
+    asset.is_cover = True
+    asset.save(update_fields=["is_cover"])
+
+
+def _promote_oldest_image(project):
+    """Si al proyecto le quedan imagenes, la mas antigua pasa a ser la portada."""
+    oldest = (
+        project.assets.filter(asset_type=AssetType.IMAGE)
+        .order_by("created_at", "pk")
+        .first()
+    )
+    if oldest is not None:
+        _mark_as_cover(oldest)
+
+
+@transaction.atomic
+def update_asset(asset, *, changes):
+    """Elegir portada no vuelve a revision; cambiar el titulo si, como editar el proyecto."""
+    is_cover = changes.get("is_cover")
+    if is_cover is False and asset.is_cover:
+        raise ValidationError(
+            {"is_cover": "La portada no se desmarca: para cambiarla, marca otra imagen."}
+        )
+    if is_cover and asset.asset_type != AssetType.IMAGE:
+        raise ValidationError({"is_cover": "Solo una imagen puede ser la portada."})
+
+    title = changes.get("title")
+    if title is not None and title != asset.title:
+        asset.title = title
+        asset.save(update_fields=["title"])
+        _resubmit(asset.project, reviewer=None)
+        asset.project.save()
+
+    if is_cover and not asset.is_cover:
+        _mark_as_cover(asset)
+    return asset
+
+
+@transaction.atomic
+def delete_asset(asset):
+    """Borra el archivo antes que la fila y, si era la portada, promueve la imagen mas antigua."""
+    project, was_cover = asset.project, asset.is_cover
     asset.file.delete(save=False)
     asset.delete()
+    if was_cover:
+        _promote_oldest_image(project)
 
 
 def add_link(project, *, link_type, title, url):

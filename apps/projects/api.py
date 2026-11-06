@@ -24,6 +24,7 @@ from apps.projects import selectors, services
 from apps.projects.models import ProjectStatus
 from apps.projects.schemas import (
     ProjectAssetOut,
+    ProjectAssetUpdateIn,
     ProjectCreateIn,
     ProjectFilters,
     ProjectLinkIn,
@@ -205,6 +206,23 @@ def upload_asset(
             title=title,
             file=file,
             is_cover=is_cover,
+        )
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+
+
+@teacher_router.patch(
+    "/projects/{project_id}/assets/{asset_id}", response=ProjectAssetOut
+)
+def update_asset(request, project_id: int, asset_id: int, payload: ProjectAssetUpdateIn):
+    """Corrige el titulo de un archivo o elige otra portada entre las imagenes subidas."""
+    project = selectors.project(project_id)
+    ensure_can_edit_project(request.auth, project)
+
+    try:
+        return services.update_asset(
+            selectors.asset(project, asset_id),
+            changes=payload.model_dump(exclude_unset=True),
         )
     except ValidationError as exc:
         raise validation_error(exc) from exc

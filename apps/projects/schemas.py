@@ -94,6 +94,13 @@ class ProjectReviewIn(Schema):
     notes: str = ""
 
 
+class ProjectAssetUpdateIn(Schema):
+    """Se manda solo lo que se cambia: el titulo, o is_cover=true para elegirla de portada."""
+
+    title: Optional[str] = None
+    is_cover: Optional[bool] = None
+
+
 class ProjectLinkIn(Schema):
     link_type: str
     title: str = ""

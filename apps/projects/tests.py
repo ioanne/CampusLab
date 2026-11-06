@@ -660,6 +660,128 @@ class ProjectFilesAndLinksTests(ProjectScenario):
         self.assertEqual(Path(self.project.assets.get().file.name).suffix, ".jpg")
 
 
+class ProjectAssetEditTests(ProjectScenario):
+    """Elegir otra portada entre las imagenes subidas y corregir el titulo de un archivo."""
+
+    def setUp(self):
+        super().setUp()
+        self.project = self._create_project(status=ProjectStatus.APPROVED)
+        self.headers = self._headers("diana@docentes.edu.ar")
+        self.first = self._upload("primera.png")
+        self.second = self._upload("segunda.png")
+
+    def _upload(self, name, asset_type=AssetType.IMAGE, content_type="image/png"):
+        return services.upload_asset(
+            self.project,
+            asset_type=asset_type,
+            title=name,
+            file=SimpleUploadedFile(name, PNG_DE_UN_PIXEL, content_type),
+        )
+
+    def _patch(self, asset, headers=None, project=None, **body):
+        project = project or self.project
+        return self.client.patch(
+            f"/api/teacher/projects/{project.id}/assets/{asset.id}",
+            data=json.dumps(body),
+            content_type="application/json",
+            headers=headers or self.headers,
+        )
+
+    def _delete(self, asset):
+        return self.client.delete(
+            f"/api/teacher/projects/{self.project.id}/assets/{asset.id}",
+            headers=self.headers,
+        )
+
+    def _cover_ids(self):
+        return list(
+            self.project.assets.filter(is_cover=True).values_list("id", flat=True)
+        )
+
+    def test_teacher_chooses_another_uploaded_image_as_cover(self):
+        response = self._patch(self.second, is_cover=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["is_cover"])
+        self.assertEqual(self._cover_ids(), [self.second.id])
+
+    def test_choosing_the_cover_does_not_send_it_back_to_review(self):
+        self._patch(self.second, is_cover=True)
+
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.status, ProjectStatus.APPROVED)
+
+    def test_editing_the_title_sends_it_back_to_review(self):
+        response = self._patch(self.first, title="Pantalla principal")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["title"], "Pantalla principal")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.status, ProjectStatus.PENDING)
+        self.assertIsNone(self.project.reviewed_by)
+
+    def test_sending_the_same_title_does_not_send_it_back_to_review(self):
+        self._patch(self.first, title=self.first.title)
+
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.status, ProjectStatus.APPROVED)
+
+    def test_the_cover_cannot_be_unmarked(self):
+        response = self._patch(self.first, is_cover=False)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self._cover_ids(), [self.first.id])
+
+    def test_a_document_cannot_be_the_cover(self):
+        document = self._upload("informe.pdf", AssetType.DOCUMENT, "application/pdf")
+
+        response = self._patch(document, is_cover=True)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self._cover_ids(), [self.first.id])
+
+    def test_another_teacher_cannot_choose_the_cover(self):
+        response = self._patch(
+            self.second, headers=self._headers("hugo@docentes.edu.ar"), is_cover=True
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self._cover_ids(), [self.first.id])
+
+    def test_an_asset_of_another_project_is_not_found(self):
+        other_project = self._create_project(title="Otro proyecto")
+
+        response = self._patch(self.second, project=other_project, is_cover=True)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_deleting_the_cover_promotes_the_oldest_remaining_image(self):
+        self._upload("tercera.png")
+
+        response = self._delete(self.first)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._cover_ids(), [self.second.id])
+
+    def test_deleting_another_image_keeps_the_cover(self):
+        self._delete(self.second)
+
+        self.assertEqual(self._cover_ids(), [self.first.id])
+
+    def test_deleting_the_last_image_leaves_no_cover(self):
+        self._delete(self.second)
+        self._delete(self.first)
+
+        self.assertEqual(self._cover_ids(), [])
+
+    def test_deleting_an_asset_removes_its_file(self):
+        storage, name = self.first.file.storage, self.first.file.name
+
+        self._delete(self.first)
+
+        self.assertFalse(storage.exists(name))
+
+
 class ProjectReviewTests(ProjectScenario):
     """La revision de la institucion."""
 
