@@ -100,6 +100,14 @@ def ensure_institution_can_touch_student(user, student):
         raise HttpError(403, "El alumno pertenece a otra institucion.")
 
 
+def _delete_course(course):
+    try:
+        services.delete_course(course)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
+
+
 # Publico
 
 
@@ -127,6 +135,17 @@ def create_career(request, payload: CareerIn):
         raise validation_error(exc) from exc
 
 
+@institution_router.delete("/careers/{career_id}")
+def delete_career(request, career_id: int):
+    career = selectors.career(career_id)
+    ensure_career_of_institution(request.auth, career)
+    try:
+        services.delete_career(career)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
+
+
 @institution_router.get("/careers/{career_id}/subjects", response=list[SubjectOut])
 def list_career_subjects(request, career_id: int):
     career = selectors.career(career_id)
@@ -144,10 +163,29 @@ def create_subject(request, career_id: int, payload: SubjectIn):
         raise validation_error(exc) from exc
 
 
+@institution_router.delete("/careers/{career_id}/subjects/{subject_id}")
+def delete_subject(request, career_id: int, subject_id: int):
+    career = selectors.career(career_id)
+    ensure_career_of_institution(request.auth, career)
+    subject = selectors.subject_of_career(career, subject_id)
+    try:
+        services.delete_subject(subject)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
+
+
 @institution_router.get("/courses", response=list[CourseOut])
 def list_institution_courses(request):
     institution = current_institution(request.auth)
     return selectors.courses_of_institution(institution)
+
+
+@institution_router.delete("/courses/{course_id}")
+def delete_course_as_institution(request, course_id: int):
+    course = selectors.course(course_id)
+    ensure_course_of_institution(request.auth, course)
+    return _delete_course(course)
 
 
 @institution_router.get("/courses/{course_id}/students", response=list[EnrollmentOut])
@@ -195,6 +233,13 @@ def create_course(request, payload: CourseIn):
         return services.create_course(request.auth, **payload.model_dump())
     except ValidationError as exc:
         raise validation_error(exc) from exc
+
+
+@teacher_router.delete("/courses/{course_id}")
+def delete_course(request, course_id: int):
+    course = selectors.course(course_id)
+    ensure_course_teacher(request.auth, course)
+    return _delete_course(course)
 
 
 @teacher_router.get("/courses/{course_id}/students", response=list[EnrollmentOut])
