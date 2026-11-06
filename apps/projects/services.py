@@ -319,9 +319,12 @@ def update_asset(asset, *, changes):
     title = changes.get("title")
     if title is not None and title != asset.title:
         asset.title = title
+        asset.full_clean()
         asset.save(update_fields=["title"])
         _resubmit(asset.project, reviewer=None)
-        asset.project.save()
+        asset.project.save(
+            update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"]
+        )
 
     if is_cover and not asset.is_cover:
         _mark_as_cover(asset)
@@ -330,10 +333,11 @@ def update_asset(asset, *, changes):
 
 @transaction.atomic
 def delete_asset(asset):
-    """Borra el archivo antes que la fila y, si era la portada, promueve la imagen mas antigua."""
+    """El archivo se borra recien con el commit: si algo falla, la fila no queda apuntando a nada."""
     project, was_cover = asset.project, asset.is_cover
-    asset.file.delete(save=False)
+    storage, name = asset.file.storage, asset.file.name
     asset.delete()
+    transaction.on_commit(lambda: storage.delete(name))
     if was_cover:
         _promote_oldest_image(project)
 

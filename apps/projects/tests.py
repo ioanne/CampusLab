@@ -726,6 +726,13 @@ class ProjectAssetEditTests(ProjectScenario):
         self.project.refresh_from_db()
         self.assertEqual(self.project.status, ProjectStatus.APPROVED)
 
+    def test_a_title_longer_than_allowed_is_rejected(self):
+        response = self._patch(self.first, title="x" * 121)
+
+        self.assertEqual(response.status_code, 400)
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.title, "primera.png")
+
     def test_the_cover_cannot_be_unmarked(self):
         response = self._patch(self.first, is_cover=False)
 
@@ -774,10 +781,11 @@ class ProjectAssetEditTests(ProjectScenario):
 
         self.assertEqual(self._cover_ids(), [])
 
-    def test_deleting_an_asset_removes_its_file(self):
+    def test_deleting_an_asset_removes_its_file_after_commit(self):
         storage, name = self.first.file.storage, self.first.file.name
 
-        self._delete(self.first)
+        with self.captureOnCommitCallbacks(execute=True):
+            self._delete(self.first)
 
         self.assertFalse(storage.exists(name))
 
