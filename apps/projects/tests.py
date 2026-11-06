@@ -16,6 +16,7 @@ from uuid import UUID
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import transaction
 from django.test import TestCase, override_settings
 from PIL import Image
 
@@ -1108,3 +1109,123 @@ class ProjectSubjectTests(ProjectScenario):
 
         with self.assertNumQueries(0):
             self.assertEqual(project.subject.name, "Programacion I")
+
+
+class ProjectDeletionTests(ProjectScenario):
+    """Borrado definitivo de proyectos: quien puede, que se lleva y que pasa con el disco."""
+
+    def _project_with_cover(self, status):
+        project = self._create_project(status=status)
+        asset = services.upload_asset(
+            project,
+            asset_type=AssetType.IMAGE,
+            title="Portada",
+            file=SimpleUploadedFile("captura.png", PNG_DE_UN_PIXEL, "image/png"),
+            is_cover=True,
+        )
+        return project, Path(asset.file.path)
+
+    def _delete(self, url, email, password="Docente12345!"):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client.delete(url, headers=self._headers(email, password))
+
+    def test_teacher_deletes_a_pending_project_and_its_files(self):
+        project, file_path = self._project_with_cover(ProjectStatus.PENDING)
+        services.add_link(
+            project, link_type=LinkType.DEMO, title="", url="https://demo.app"
+        )
+        self.assertTrue(file_path.exists())
+
+        response = self._delete(
+            f"/api/teacher/projects/{project.id}", "diana@docentes.edu.ar"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Project.objects.filter(pk=project.id).exists())
+        self.assertFalse(file_path.exists())
+        self.assertTrue(Student.objects.filter(pk=self.ana.id).exists())
+        self.assertTrue(Technology.objects.filter(pk=self.technology.id).exists())
+
+    def test_teacher_cannot_delete_a_published_project(self):
+        project, file_path = self._project_with_cover(ProjectStatus.APPROVED)
+
+        response = self._delete(
+            f"/api/teacher/projects/{project.id}", "diana@docentes.edu.ar"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Project.objects.filter(pk=project.id).exists())
+        self.assertTrue(file_path.exists())
+
+    def test_institution_deletes_a_published_project(self):
+        project, file_path = self._project_with_cover(ProjectStatus.APPROVED)
+
+        response = self._delete(
+            f"/api/institution/projects/{project.id}",
+            "rectoria@ifts18.edu.ar",
+            "Rectoria12345!",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Project.objects.filter(pk=project.id).exists())
+        self.assertFalse(file_path.exists())
+
+    def test_another_teacher_cannot_delete_the_project(self):
+        project = self._create_project(status=ProjectStatus.PENDING)
+
+        response = self._delete(f"/api/teacher/projects/{project.id}", "hugo@docentes.edu.ar")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Project.objects.filter(pk=project.id).exists())
+
+    def test_another_institution_cannot_delete_the_project(self):
+        project = self._create_project(status=ProjectStatus.PENDING)
+
+        response = self._delete(
+            f"/api/institution/projects/{project.id}",
+            "rectoria@ifts24.edu.ar",
+            "Rectoria12345!",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Project.objects.filter(pk=project.id).exists())
+
+    def test_files_stay_on_disk_if_the_deletion_rolls_back(self):
+        project, file_path = self._project_with_cover(ProjectStatus.PENDING)
+        project_id = project.id
+
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            try:
+                with transaction.atomic():
+                    services.delete_project(project)
+                    raise RuntimeError("falla despues de borrar")
+            except RuntimeError:
+                pass
+
+        self.assertEqual(callbacks, [])
+        self.assertTrue(Project.objects.filter(pk=project_id).exists())
+        self.assertTrue(file_path.exists())
+
+    def test_course_with_projects_cannot_be_deleted(self):
+        self._create_project(status=ProjectStatus.PENDING)
+
+        response = self._delete(
+            f"/api/institution/courses/{self.course.id}",
+            "rectoria@ifts18.edu.ar",
+            "Rectoria12345!",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("proyectos", response.json()["detail"])
+        self.assertTrue(Course.objects.filter(pk=self.course.id).exists())
+
+    def test_course_can_be_deleted_once_its_projects_are_gone(self):
+        project = self._create_project(status=ProjectStatus.PENDING)
+        self._delete(f"/api/teacher/projects/{project.id}", "diana@docentes.edu.ar")
+
+        response = self._delete(
+            f"/api/teacher/courses/{self.course.id}", "diana@docentes.edu.ar"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Course.objects.filter(pk=self.course.id).exists())
