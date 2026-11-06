@@ -21,7 +21,32 @@ from apps.academics.models import (
 )
 from apps.accounts.models import UserRole
 from apps.institutions import selectors as institutions_selectors
+from core.deletion import BlockedWhileRelated, delete_definitively
 from core.validators import ensure_choice
+
+CAREER_DELETION_RULES = (
+    BlockedWhileRelated(
+        "courses",
+        "career_id",
+        "La carrera tiene cursadas: primero hay que borrarlas.",
+    ),
+)
+
+SUBJECT_DELETION_RULES = (
+    BlockedWhileRelated(
+        "courses",
+        "subject_id",
+        "La materia se dicta en alguna cursada: primero hay que borrarla.",
+    ),
+)
+
+COURSE_DELETION_RULES = (
+    BlockedWhileRelated(
+        "projects",
+        "course_id",
+        "La cursada tiene proyectos cargados: primero hay que borrarlos.",
+    ),
+)
 
 
 def create_career(institution, *, name):
@@ -220,3 +245,17 @@ def remove_enrollment(enrollment):
             }
         )
     enrollment.delete()
+
+
+def delete_career(career):
+    """Borra la carrera y sus materias; no si ya tiene cursadas."""
+    delete_definitively(career, rules=CAREER_DELETION_RULES)
+
+
+def delete_subject(subject):
+    delete_definitively(subject, rules=SUBJECT_DELETION_RULES)
+
+
+def delete_course(course):
+    """Borra la cursada y sus inscripciones; los alumnos siguen en la institucion."""
+    delete_definitively(course, rules=COURSE_DELETION_RULES)

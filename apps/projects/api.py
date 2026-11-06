@@ -72,6 +72,25 @@ def ensure_can_edit_project(user, project):
         raise HttpError(403, "El proyecto es de la cursada de otro docente.")
 
 
+def ensure_can_delete_project(user, project):
+    """Lo publicado ya esta en el catalogo: sacarlo es decision de la institucion."""
+    ensure_can_edit_project(user, project)
+    if user.role == UserRole.TEACHER and project.is_approved:
+        raise HttpError(
+            403, "El proyecto ya esta publicado: solo la institucion lo puede borrar."
+        )
+
+
+def _delete_project(request, project_id):
+    project = selectors.project(project_id)
+    ensure_can_delete_project(request.auth, project)
+    try:
+        services.delete_project(project)
+    except ValidationError as exc:
+        raise validation_error(exc) from exc
+    return {"success": True}
+
+
 @institution_router.get("/projects/{project_id}", response=ProjectOut)
 def get_institution_project(request, project_id: int):
     """La ficha completa de un proyecto de la institucion, en cualquier estado."""
@@ -181,6 +200,12 @@ def update_project(request, project_id: int, payload: ProjectUpdateIn):
     return selectors.full_project(project.pk)
 
 
+@teacher_router.delete("/projects/{project_id}")
+def delete_my_project(request, project_id: int):
+    """Borra un proyecto propio mientras no este publicado."""
+    return _delete_project(request, project_id)
+
+
 @teacher_router.post("/projects/{project_id}/assets", response=ProjectAssetOut)
 def upload_asset(
     request,
@@ -271,6 +296,12 @@ def create_institution_project(request, payload: ProjectCreateIn):
         raise validation_error(exc) from exc
 
     return selectors.full_project(project.pk)
+
+
+@institution_router.delete("/projects/{project_id}")
+def delete_institution_project(request, project_id: int):
+    """Borra un proyecto de la institucion, aunque ya este publicado."""
+    return _delete_project(request, project_id)
 
 
 def _review(request, project_id, status, payload):
