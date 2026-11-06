@@ -38,11 +38,6 @@ def subject(subject_id):
     return get_object_or_404(Subject.objects.with_career(), pk=subject_id)
 
 
-def subject_of_career(career, subject_id):
-    """Una materia buscada DENTRO de la carrera: un id ajeno da 404."""
-    return get_object_or_404(Subject.objects.of_career(career), pk=subject_id)
-
-
 def courses_of_teacher(teacher):
     """Las cursadas que dicta ese docente: lo que ve al entrar."""
     return Course.objects.of_teacher(teacher).with_related()

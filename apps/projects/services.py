@@ -31,7 +31,6 @@ from apps.projects.models import (
     ProjectStudent,
     ProjectTechnology,
 )
-from core.deletion import delete_definitively
 from core.validators import ensure_choice
 
 IMAGE_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
@@ -315,9 +314,3 @@ def add_link(project, *, link_type, title, url):
 
 def delete_link(link):
     link.delete()
-
-
-def delete_project(project):
-    """Borra el proyecto con todo lo suyo y, al confirmar, sus archivos del disco."""
-    files = [asset.file for asset in project.assets.all()]
-    delete_definitively(project, files=files)
