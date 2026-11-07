@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 from ninja import Field, Schema
+from pydantic import field_validator
 
 from apps.academics.schemas import CareerOut, CourseOut
 from apps.catalogs.schemas import TechnologyOut
@@ -19,9 +20,10 @@ from apps.projects.models import ProjectKind
 class ProjectFilters(Schema):
     """Filtros del catalogo. Todos son opcionales y se combinan entre si.
 
-    institution_id, career_id, course_id y year no son campos del proyecto: son
-    datos de la cursada, y por eso el queryset los busca cruzando la relacion.
-    Para el que consulta la API eso es invisible, que es como tiene que ser.
+    institution_id, institution, career_id, course_id, subject_id, teacher_id,
+    teacher, year y term no son campos del proyecto: son datos de la cursada, y
+    por eso el queryset los busca cruzando la relacion. Para el que consulta la
+    API eso es invisible, que es como tiene que ser.
 
     search es la caja de busqueda: cada palabra tiene que aparecer en el titulo,
     el resumen, la descripcion, el equipo, los alumnos, el docente, la materia,
@@ -33,12 +35,23 @@ class ProjectFilters(Schema):
 
     search: Optional[str] = Field(None, max_length=200)
     student: Optional[str] = None
+    team: Optional[str] = None
     institution_id: Optional[int] = None
+    institution: Optional[str] = None
     career_id: Optional[int] = None
     course_id: Optional[int] = None
-    technology_id: Optional[int] = None
+    subject_id: Optional[int] = None
+    teacher_id: Optional[int] = None
+    teacher: Optional[str] = None
+    technology_id: list[int] = []
     year: Optional[int] = None
-    team: Optional[str] = None
+    term: Optional[str] = None
+    kind: Optional[str] = None
+
+    @field_validator("kind", "term")
+    @classmethod
+    def _to_upper(cls, value):
+        return value.upper() if value else value
 
 
 class ProjectCreateIn(Schema):

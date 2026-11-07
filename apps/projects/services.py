@@ -31,6 +31,7 @@ from apps.projects.models import (
     ProjectStudent,
     ProjectTechnology,
 )
+from core.validators import ensure_choice
 
 IMAGE_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 
@@ -132,8 +133,7 @@ def _initial_status(course):
 
 
 def _validate_kind(kind):
-    if kind not in ProjectKind.values:
-        raise ValidationError({"kind": "El tipo de proyecto no es valido."})
+    ensure_choice("kind", kind, ProjectKind, "El tipo de proyecto no es valido.")
 
 
 @transaction.atomic
