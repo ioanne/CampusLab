@@ -8,7 +8,7 @@ dependencia que en los modelos: proyectos conoce a las demas y no al reves.
 from datetime import datetime
 from typing import Optional
 
-from ninja import Schema
+from ninja import Field, Schema
 from pydantic import field_validator
 
 from apps.academics.schemas import CareerOut, CourseOut
@@ -24,9 +24,16 @@ class ProjectFilters(Schema):
     teacher, year y term no son campos del proyecto: son datos de la cursada, y
     por eso el queryset los busca cruzando la relacion. Para el que consulta la
     API eso es invisible, que es como tiene que ser.
+
+    search es la caja de busqueda: cada palabra tiene que aparecer en el titulo,
+    el resumen, la descripcion, el equipo, los alumnos, el docente, la materia,
+    la carrera, la institucion o las tecnologias del proyecto. Admite hasta 200
+    caracteres: cada palabra es una subconsulta, y el catalogo es publico, asi
+    que el tope acota cuantas puede pedir cualquiera. Si se pasa, Ninja responde
+    422 solo.
     """
 
-    search: Optional[str] = None
+    search: Optional[str] = Field(None, max_length=200)
     student: Optional[str] = None
     team: Optional[str] = None
     institution_id: Optional[int] = None

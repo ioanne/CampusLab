@@ -987,6 +987,139 @@ class PublicCatalogTests(ProjectScenario):
         )
 
 
+class ProjectSearchTests(ProjectScenario):
+    """La caja de busqueda del catalogo: una sola, que mira los datos del
+    proyecto y los de su cursada."""
+
+    def setUp(self):
+        super().setUp()
+        self.museo = self._create_project(
+            title="Museo Virtual",
+            summary="Galeria de trabajos",
+            description="Un recorrido en tres dimensiones",
+            team_name="Los Curadores",
+            students=[self.ana, self.bruno],
+        )
+        services.replace_technologies(self.museo, [self.technology.id])
+        self.huerta = self._create_project(
+            course=self.other_course,
+            title="Huerta agroecologica",
+            summary="Verdura en la terraza",
+            team_name="Equipo 2",
+            students=[self.carla],
+        )
+        # Un proyecto de la otra institucion con todo distinto: otro docente,
+        # otra carrera, otra materia y otra tecnologia. Sin el, buscar por esos
+        # campos traeria siempre los dos de arriba y no probaria nada.
+        career = Career.objects.create(
+            institution=self.other_institution, name="Analisis de Sistemas"
+        )
+        course = Course.objects.create(
+            career=career,
+            subject=Subject.objects.create(career=career, name="Bases de Datos"),
+            teacher=self.other_teacher,
+            name="1C - Tarde",
+            year=2026,
+            term=CourseTerm.FIRST,
+        )
+        self.agenda = self._create_project(
+            course=course,
+            title="Agenda de turnos",
+            summary="Turnos para el centro de salud",
+            team_name="Equipo 4",
+            students=[self._enroll("Lucia", "Fernandez", course)],
+        )
+        services.replace_technologies(self.agenda, [self.other_technology.id])
+        self._create_project(title="Museo sin aprobar", status=ProjectStatus.PENDING)
+
+    def _titles(self, text, **filters):
+        response = self.client.get("/api/projects", {"search": text, **filters})
+        self.assertEqual(response.status_code, 200)
+        return sorted(p["title"] for p in response.json())
+
+    def test_each_field_finds_its_project(self):
+        museo, huerta, agenda = "Museo Virtual", "Huerta agroecologica", "Agenda de turnos"
+        casos = [
+            ("titulo", "virtual", [museo]),
+            ("resumen", "terraza", [huerta]),
+            ("descripcion", "dimensiones", [museo]),
+            ("equipo", "curadores", [museo]),
+            ("nombre del alumno", "carla", [huerta]),
+            ("apellido del alumno", "fernandez", [agenda]),
+            ("nombre del docente", "hugo", [agenda]),
+            ("apellido del docente", "perez", [agenda]),
+            ("materia", "bases", [agenda]),
+            ("carrera", "analisis", [agenda]),
+            ("institucion", "ifts", [agenda, huerta, museo]),
+            ("tecnologia", "react", [agenda]),
+        ]
+        for campo, texto, esperado in casos:
+            with self.subTest(campo=campo, texto=texto):
+                self.assertEqual(self._titles(texto), esperado)
+
+    def test_it_does_not_distinguish_upper_and_lower_case(self):
+        self.assertEqual(self._titles("MUSEO"), ["Museo Virtual"])
+        self.assertEqual(self._titles("dJaNgO"), ["Museo Virtual"])
+        self.assertEqual(self._titles("HUGO"), ["Agenda de turnos"])
+
+    def test_every_word_has_to_appear_in_some_field(self):
+        """AND entre palabras, OR entre campos: cada palabra puede caer en un
+        campo distinto, pero tienen que estar todas."""
+        self.assertEqual(self._titles("ana django"), ["Museo Virtual"])
+        self.assertEqual(self._titles("turnos react"), ["Agenda de turnos"])
+        self.assertEqual(self._titles("carla django"), [])
+        self.assertEqual(self._titles("ana   django"), ["Museo Virtual"])
+
+    def test_the_words_can_fall_on_different_students(self):
+        """Gomez es Ana y Diaz es Bruno: dos integrantes distintos del Museo.
+        Con un solo filter() para las dos palabras, Django las pediria en el
+        mismo alumno y el Museo no apareceria."""
+        self.assertEqual(self._titles("gomez diaz"), ["Museo Virtual"])
+
+    def test_a_project_is_not_repeated(self):
+        """El Museo tiene dos alumnos: cruzar la relacion lo trae una vez por
+        cada uno, y sin distinct() aparecia repetido."""
+        response = self.client.get("/api/projects", {"search": "o a"})
+        ids = [p["id"] for p in response.json()]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(len(ids), 3)
+
+    def test_a_blank_search_returns_the_whole_catalog(self):
+        self.assertEqual(
+            self._titles("   "),
+            ["Agenda de turnos", "Huerta agroecologica", "Museo Virtual"],
+        )
+
+    def test_the_search_does_not_show_what_is_not_approved(self):
+        self.assertEqual(self._titles("museo"), ["Museo Virtual"])
+
+    def test_the_search_combines_with_the_other_filters(self):
+        self.assertEqual(self._titles("django", student="bruno"), ["Museo Virtual"])
+        self.assertEqual(self._titles("django", student="carla"), [])
+        # search y student cruzan los alumnos cada uno por su cuenta: Gomez es
+        # Ana y Bruno es otro integrante. Si compartieran el cruce, pedirian un
+        # mismo alumno que fuera las dos cosas y no traerian nada.
+        self.assertEqual(self._titles("gomez", student="bruno"), ["Museo Virtual"])
+
+    def test_a_long_search_still_answers(self):
+        """Una frase larga no puede tirar el catalogo. Si cada palabra sumara sus
+        propios joins a alumnos y tecnologias, con 15 palabras la consulta
+        pasaria los 64 joins que admite SQLite y la API responderia 500."""
+        self.assertEqual(self._titles("museo " * 20), ["Museo Virtual"])
+
+    def test_the_longest_search_allowed_still_answers(self):
+        # 100 palabras de una letra: lo mas que entra en 200 caracteres, y por
+        # lo tanto la mayor cantidad de subconsultas que se puede pedir.
+        response = self.client.get("/api/projects", {"search": "a " * 100})
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_search_longer_than_200_characters_is_rejected(self):
+        """El catalogo es publico: el tope acota cuantas subconsultas puede
+        pedir cualquiera desde afuera."""
+        response = self.client.get("/api/projects", {"search": "a " * 101})
+        self.assertEqual(response.status_code, 422)
+
+
 class CatalogFiltersTests(ProjectScenario):
     def setUp(self):
         super().setUp()
