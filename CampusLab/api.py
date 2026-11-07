@@ -24,6 +24,7 @@ from apps.projects.api import (
     public_router as catalog_router,
     teacher_router as projects_teacher_router,
 )
+from core.errors import ValidationHttpError, validation_error_handler
 
 api = NinjaAPI(
     title="Banco de Proyectos API",
@@ -42,6 +43,9 @@ api = NinjaAPI(
 @api.get("/health", tags=["Sistema"])
 def healthcheck(request):
     return {"status": "ok"}
+
+
+api.add_exception_handler(ValidationHttpError, validation_error_handler(api))
 
 
 # Cada app trae sus routers y este archivo decide bajo que prefijo se cuelgan.

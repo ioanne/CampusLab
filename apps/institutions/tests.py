@@ -45,7 +45,7 @@ class InstitutionsApiTests(TestCase):
             data=json.dumps(
                 {
                     "email": "rectoria@ifts18.edu.ar",
-                    "password": "Rectoria12345!",
+                    "password": "Pizarron2026!",
                     "first_name": "Rectoria",
                     "last_name": "IFTS",
                 }
@@ -53,7 +53,7 @@ class InstitutionsApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
-        return self._login("rectoria@ifts18.edu.ar", "Rectoria12345!")
+        return self._login("rectoria@ifts18.edu.ar", "Pizarron2026!")
 
     def test_public_list_needs_no_token(self):
         response = self.client.get("/api/institutions")
@@ -88,6 +88,26 @@ class InstitutionsApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(list(response.json()["errors"]), ["email"])
+
+    def test_activation_rejects_a_weak_password(self):
+        response = self.client.post(
+            "/api/institutions/activate",
+            data=json.dumps(
+                {
+                    "email": "rectoria@ifts18.edu.ar",
+                    "password": "1",
+                    "first_name": "Rectoria",
+                    "last_name": "IFTS",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password", response.json()["errors"])
+        self.rule.refresh_from_db()
+        self.assertFalse(self.rule.is_activated)
 
     def test_email_cannot_activate_twice(self):
         self._activate_institution()
@@ -105,6 +125,7 @@ class InstitutionsApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(list(response.json()["errors"]), ["email"])
 
     def test_institution_invites_and_teacher_accepts(self):
         institution_access = self._activate_institution()
