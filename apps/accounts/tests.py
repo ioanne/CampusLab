@@ -4,6 +4,8 @@ from django.test import TestCase
 import json
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.accounts.models import UserRole
@@ -115,7 +117,7 @@ class AccountsApiTests(TestCase):
                     "email": "dario@docentes.edu.ar",
                     "first_name": "Dario",
                     "last_name": "Docente",
-                    "password": "Docente12345!",
+                    "password": "Pizarron2026!",
                 }
             ),
             content_type="application/json",
@@ -132,13 +134,14 @@ class AccountsApiTests(TestCase):
                     "email": "diana@docentes.edu.ar",
                     "first_name": "Diana",
                     "last_name": "Repetida",
-                    "password": "Docente12345!",
+                    "password": "Pizarron2026!",
                 }
             ),
             content_type="application/json",
         )
 
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(list(response.json()["errors"]), ["email"])
 
     def test_admin_manages_users_and_others_cannot(self):
         access = self._login("admin@plataforma.edu.ar", "Admin12345!")
@@ -149,7 +152,7 @@ class AccountsApiTests(TestCase):
                     "email": "rectorado@iftsX.edu.ar",
                     "first_name": "Ines",
                     "last_name": "Instituto",
-                    "password": "Instituto12345!",
+                    "password": "Pizarron2026!",
                     "role": UserRole.INSTITUTION,
                 }
             ),
@@ -204,3 +207,138 @@ class AccountsApiTests(TestCase):
     def test_me_requires_token(self):
         response = self.client.get("/api/auth/me")
         self.assertEqual(response.status_code, 401)
+
+
+class StrongPasswordTests(TestCase):
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.admin = self.user_model.objects.create_superuser(
+            email="admin@plataforma.edu.ar",
+            password="Admin12345!",
+            first_name="Ada",
+            last_name="Admin",
+        )
+        self.teacher = self.user_model.objects.create_user(
+            email="diana@docentes.edu.ar",
+            password="Docente12345!",
+            first_name="Diana",
+            last_name="Docente",
+            role=UserRole.TEACHER,
+        )
+
+    def _post(self, url, payload, **extra):
+        return self.client.post(url, data=json.dumps(payload), content_type="application/json", **extra)
+
+    def _admin_headers(self):
+        response = self._post("/api/auth/login", {"email": "admin@plataforma.edu.ar", "password": "Admin12345!"})
+        return {"HTTP_AUTHORIZATION": f"Bearer {response.json()['access']}"}
+
+    def _register(self, password, **overrides):
+        payload = {
+            "email": "dario@docentes.edu.ar",
+            "first_name": "Dario",
+            "last_name": "Perez",
+            "password": password,
+            **overrides,
+        }
+        return self._post("/api/auth/register/teacher", payload)
+
+    def test_registration_rejects_a_one_character_password(self):
+        response = self._register("a")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password", response.json()["errors"])
+        self.assertFalse(self.user_model.objects.filter(email="dario@docentes.edu.ar").exists())
+
+    def test_each_rule_rejects_its_own_case(self):
+        candidate = self.user_model(email="dario@docentes.edu.ar", first_name="Dario", last_name="Perez")
+        cases = {
+            "password_too_short": "Ab1",
+            "password_too_common": "password123",
+            "password_no_letter_and_digit": "PizarronVerde",
+            "password_too_similar": "dariodocentes1",
+        }
+        for code, password in cases.items():
+            with self.subTest(code=code):
+                with self.assertRaises(ValidationError) as ctx:
+                    validate_password(password, user=candidate)
+                self.assertIn(code, [error.code for error in ctx.exception.error_list])
+
+    def test_entirely_numeric_password_gets_a_single_message(self):
+        response = self._register("48213957601")
+
+        self.assertEqual(len(response.json()["errors"]["password"]), 1)
+
+    def test_errors_of_every_field_come_together(self):
+        response = self._register("1", email="diana@docentes.edu.ar")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(set(response.json()["errors"]), {"email", "password"})
+
+    def test_registration_accepts_a_strong_password(self):
+        response = self._register("Pizarron2026!")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_errors_are_grouped_by_field_and_keep_the_detail_text(self):
+        response = self._register("123")
+
+        body = response.json()
+        self.assertEqual(list(body["errors"]), ["password"])
+        self.assertGreaterEqual(len(body["errors"]["password"]), 2)
+        self.assertTrue(body["detail"].startswith("password:"))
+
+    def test_admin_cannot_create_a_user_with_a_weak_password(self):
+        response = self._post(
+            "/api/admin/users",
+            {
+                "email": "ines@instituto.edu.ar",
+                "first_name": "Ines",
+                "last_name": "Instituto",
+                "password": "1234",
+                "role": UserRole.INSTITUTION,
+            },
+            **self._admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password", response.json()["errors"])
+        self.assertFalse(self.user_model.objects.filter(email="ines@instituto.edu.ar").exists())
+
+    def test_admin_cannot_set_a_weak_password_when_editing(self):
+        response = self.client.patch(
+            f"/api/admin/users/{self.teacher.id}",
+            data=json.dumps({"password": "x", "first_name": "Otra"}),
+            content_type="application/json",
+            **self._admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password", response.json()["errors"])
+        self.teacher.refresh_from_db()
+        self.assertTrue(self.teacher.check_password("Docente12345!"))
+        self.assertEqual(self.teacher.first_name, "Diana")
+
+    def test_admin_cannot_blank_the_password_when_editing(self):
+        response = self.client.patch(
+            f"/api/admin/users/{self.teacher.id}",
+            data=json.dumps({"password": ""}),
+            content_type="application/json",
+            **self._admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.teacher.refresh_from_db()
+        self.assertTrue(self.teacher.check_password("Docente12345!"))
+
+    def test_admin_can_set_a_strong_password_when_editing(self):
+        response = self.client.patch(
+            f"/api/admin/users/{self.teacher.id}",
+            data=json.dumps({"password": "Pizarron2026!"}),
+            content_type="application/json",
+            **self._admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.teacher.refresh_from_db()
+        self.assertTrue(self.teacher.check_password("Pizarron2026!"))

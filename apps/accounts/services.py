@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 
 from apps.accounts.models import UserRole
+from apps.accounts.validators import ensure_strong_password
 
 
 def _validate_role(role):
@@ -16,8 +17,30 @@ def _validate_role(role):
         raise ValidationError({"role": f"Rol invalido. Opciones: {', '.join(UserRole.values)}."})
 
 
+def _raise_all(*checks):
+    """Corre todas las validaciones y devuelve sus errores juntos, por campo."""
+    errors = {}
+    for check in checks:
+        try:
+            check()
+        except ValidationError as exc:
+            errors = exc.update_error_dict(errors)
+    if errors:
+        raise ValidationError(errors)
+
+
 def create_user(*, email, password, first_name, last_name, role):
-    _validate_role(role)
+    user_model = get_user_model()
+    candidate = user_model(
+        email=user_model.objects.normalize_email(email).lower(),
+        first_name=first_name,
+        last_name=last_name,
+    )
+    _raise_all(
+        lambda: _validate_role(role),
+        lambda: candidate.full_clean(exclude=["password", "role"]),
+        lambda: ensure_strong_password(password, user=candidate),
+    )
     try:
         return get_user_model().objects.create_user(
             email=email,
@@ -51,14 +74,18 @@ def register_teacher(*, email, password, first_name, last_name):
 def update_user(user, *, changes):
     """Aplica solo los campos que llegaron. La contrasena nunca se asigna
     directo: pasa por set_password para quedar hasheada."""
-    if "role" in changes:
-        _validate_role(changes["role"])
-
     password = changes.pop("password", None)
+    role_changed = "role" in changes
     for field, value in changes.items():
         setattr(user, field, value)
 
-    if password:
+    _raise_all(
+        lambda: _validate_role(user.role) if role_changed else None,
+        lambda: user.full_clean(exclude=["password", "role"]),
+        lambda: ensure_strong_password(password, user=user) if password is not None else None,
+    )
+
+    if password is not None:
         user.set_password(password)
 
     try:
